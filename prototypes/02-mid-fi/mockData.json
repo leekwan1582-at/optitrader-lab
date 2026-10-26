@@ -1,20 +1,76 @@
 {
+  "workspace": {
+    "workspace_id": "ws_quant_research",
+    "name": "Marcus_Lim_Research",
+    "owner": "Marcus Lim"
+  },
+  "datasets": [
+    {
+      "dataset_id": "ds_eurusd_h1_2020_2025",
+      "name": "EURUSD_H1",
+      "symbol": "EURUSD",
+      "timeframe": "1H",
+      "date_range": "2020-01-01 to 2025-01-01",
+      "rows": 31240,
+      "status": "validated"
+    },
+    {
+      "dataset_id": "ds_es_d1_2015_2025",
+      "name": "ES_D1",
+      "symbol": "ES",
+      "timeframe": "1D",
+      "date_range": "2015-01-01 to 2025-01-01",
+      "rows": 2550,
+      "status": "validated"
+    },
+    {
+      "dataset_id": "ds_nq_m15_2023_2024",
+      "name": "NQ_M15",
+      "symbol": "NQ",
+      "timeframe": "15m",
+      "date_range": "2023-06-01 to 2024-06-01",
+      "rows": 24100,
+      "status": "validated"
+    }
+  ],
   "profiles": [
     {
       "profile_id": "7c1e9a52-3f0b-4b6e-9d2a-1a4f8e6b2c10",
       "name": "EURUSD SMA Sweep",
       "strategy_type": "sma_crossover",
-      "params": { "fast_ma": { "min": 5, "max": 30, "step": 5 }, "slow_ma": { "min": 40, "max": 120, "step": 10 } },
       "objective": "sharpe",
-      "max_drawdown_limit": 0.15
+      "max_drawdown_limit": 0.15,
+      "params": {
+        "fast_ma": {
+          "min": 5,
+          "max": 30,
+          "step": 5
+        },
+        "slow_ma": {
+          "min": 40,
+          "max": 120,
+          "step": 10
+        }
+      }
     },
     {
       "profile_id": "a2d94c07-61e8-4f3a-8b15-5c0e7d93b4f2",
       "name": "ES EMA Momentum",
       "strategy_type": "ema_momentum",
-      "params": { "fast_ma": { "min": 10, "max": 40, "step": 5 }, "slow_ma": { "min": 60, "max": 200, "step": 20 } },
       "objective": "total_return",
-      "max_drawdown_limit": 0.2
+      "max_drawdown_limit": 0.20,
+      "params": {
+        "fast_ma": {
+          "min": 10,
+          "max": 40,
+          "step": 5
+        },
+        "slow_ma": {
+          "min": 60,
+          "max": 200,
+          "step": 20
+        }
+      }
     }
   ],
   "runs": [
@@ -23,19 +79,160 @@
       "profile_id": "7c1e9a52-3f0b-4b6e-9d2a-1a4f8e6b2c10",
       "dataset_id": "ds_eurusd_h1_2020_2025",
       "status": "completed",
+      "created_at": "2026-10-20T10:30:00Z",
+      "duration_ms": 18423,
+      "holdout_pct": 0.20,
       "trials": 54,
-      "holdout_pct": 0.2,
-      "best": { "fast_ma": 15, "slow_ma": 60, "sharpe": 1.18, "total_return": 0.42, "max_drawdown": 0.121, "trades": 87 },
-      "duration_ms": 18423
+      "best": {
+        "fast_ma": 15,
+        "slow_ma": 60,
+        "sharpe": 1.18,
+        "total_return": 0.42,
+        "max_drawdown": 0.121,
+        "profit_factor": 1.42,
+        "trades": 87
+      },
+      "robustness": {
+        "confidence_score": 7.8,
+        "edge_of_grid": false,
+        "out_of_sample_drop": -0.37,
+        "transaction_costs_included": false,
+        "walk_forward_completed": false,
+        "warnings": [
+          "Out-of-Sample Drop -37%",
+          "Transaction Costs Not Included",
+          "Walk-Forward Validation Missing",
+          "Selection Bias Risk Present"
+        ]
+      },
+      "equity_curve": [
+        10000,
+        10250,
+        10180,
+        10640,
+        10910,
+        10870,
+        11200,
+        11550,
+        11400,
+        11820,
+        12110,
+        12540,
+        12420,
+        12880,
+        13100,
+        13520,
+        13850,
+        13700,
+        14150,
+        14620,
+        15200,
+        15850,
+        16200,
+        16800,
+        17350,
+        18100,
+        19050,
+        19900,
+        21000,
+        22400
+      ]
     },
     {
       "run_id": "5fa80d36-b9e2-47c1-8d04-3e6a2c91f7b8",
       "profile_id": "a2d94c07-61e8-4f3a-8b15-5c0e7d93b4f2",
       "dataset_id": "ds_es_d1_2015_2025",
       "status": "failed",
+      "created_at": "2026-10-18T08:00:00Z",
+      "duration_ms": 120000,
       "error_code": "TIMEOUT",
-      "trials": 120,
-      "duration_ms": 120000
+      "trials": 120
+    },
+    {
+      "run_id": "a7ce004e-12c4-4b2f-ab33-f43a8dd4c819",
+      "profile_id": "7c1e9a52-3f0b-4b6e-9d2a-1a4f8e6b2c10",
+      "dataset_id": "ds_nq_m15_2023_2024",
+      "status": "completed",
+      "created_at": "2026-10-15T13:22:00Z",
+      "duration_ms": 31122,
+      "holdout_pct": 0.20,
+      "trials": 96,
+      "best": {
+        "fast_ma": 10,
+        "slow_ma": 80,
+        "sharpe": 0.94,
+        "total_return": 0.31,
+        "max_drawdown": 0.084,
+        "profit_factor": 1.28,
+        "trades": 123
+      },
+      "robustness": {
+        "confidence_score": 8.4,
+        "edge_of_grid": false,
+        "out_of_sample_drop": -0.12,
+        "transaction_costs_included": true,
+        "walk_forward_completed": true,
+        "warnings": [
+          "Moderate Out-of-Sample Degradation"
+        ]
+      },
+      "equity_curve": [
+        10000,
+        10080,
+        10250,
+        10150,
+        10400,
+        10650,
+        10720,
+        10980,
+        11100,
+        11420,
+        11500,
+        11750,
+        11900,
+        12080,
+        12250,
+        12650,
+        12720,
+        13050,
+        13220,
+        13510,
+        13720,
+        13980,
+        14150,
+        14400,
+        14750,
+        14950,
+        15220,
+        15550,
+        15880,
+        16200
+      ]
     }
-  ]
+  ],
+  "error_logs": [
+    {
+      "severity": "warning",
+      "timestamp": "2026-10-20T10:34:01Z",
+      "component": "Backtest Engine",
+      "message": "Commission not specified."
+    },
+    {
+      "severity": "warning",
+      "timestamp": "2026-10-20T10:34:05Z",
+      "component": "Validator",
+      "message": "Holdout size below recommended threshold."
+    },
+    {
+      "severity": "info",
+      "timestamp": "2026-10-20T10:34:22Z",
+      "component": "Optimizer",
+      "message": "Best Sharpe updated to 1.18."
+    }
+  ],
+  "settings": {
+    "max_trials": 500,
+    "default_holdout_pct": 0.20,
+    "default_objective": "sharpe"
+  }
 }

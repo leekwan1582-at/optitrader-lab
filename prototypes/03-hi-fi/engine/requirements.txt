@@ -1,0 +1,13 @@
+# Core Backtesting & Quantitative Engine
+vectorbt>=0.26.0
+
+# Data Manipulation & Math (Required by vectorbt)
+pandas>=2.0.0
+numpy>=1.24.0,<2.0.0  # Capped below 2.0 to prevent compatibility issues with Numba/C-extensions
+
+# Optional: Helpful for reading the CSV files uploaded via the Node.js backend
+python-dateutil>=2.8.2
+
+# Testing frameworks
+pytest>=8.0.0
+pytest-mock>=3.12.0
