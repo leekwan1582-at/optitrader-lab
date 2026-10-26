@@ -1,0 +1,41 @@
+{
+  "profiles": [
+    {
+      "profile_id": "7c1e9a52-3f0b-4b6e-9d2a-1a4f8e6b2c10",
+      "name": "EURUSD SMA Sweep",
+      "strategy_type": "sma_crossover",
+      "params": { "fast_ma": { "min": 5, "max": 30, "step": 5 }, "slow_ma": { "min": 40, "max": 120, "step": 10 } },
+      "objective": "sharpe",
+      "max_drawdown_limit": 0.15
+    },
+    {
+      "profile_id": "a2d94c07-61e8-4f3a-8b15-5c0e7d93b4f2",
+      "name": "ES EMA Momentum",
+      "strategy_type": "ema_momentum",
+      "params": { "fast_ma": { "min": 10, "max": 40, "step": 5 }, "slow_ma": { "min": 60, "max": 200, "step": 20 } },
+      "objective": "total_return",
+      "max_drawdown_limit": 0.2
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "e41b7c90-2d5a-4c18-a3f6-9b0d1e7a5c33",
+      "profile_id": "7c1e9a52-3f0b-4b6e-9d2a-1a4f8e6b2c10",
+      "dataset_id": "ds_eurusd_h1_2020_2025",
+      "status": "completed",
+      "trials": 54,
+      "holdout_pct": 0.2,
+      "best": { "fast_ma": 15, "slow_ma": 60, "sharpe": 1.18, "total_return": 0.42, "max_drawdown": 0.121, "trades": 87 },
+      "duration_ms": 18423
+    },
+    {
+      "run_id": "5fa80d36-b9e2-47c1-8d04-3e6a2c91f7b8",
+      "profile_id": "a2d94c07-61e8-4f3a-8b15-5c0e7d93b4f2",
+      "dataset_id": "ds_es_d1_2015_2025",
+      "status": "failed",
+      "error_code": "TIMEOUT",
+      "trials": 120,
+      "duration_ms": 120000
+    }
+  ]
+}

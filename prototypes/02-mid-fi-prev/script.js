@@ -83,31 +83,22 @@ const chartBaseOptions = {
     }
 };
 
-function renderEquityChart() {
-    // Prevent re-rendering if already exists and visible
-    if (equityChartInstance) return;
+async function loadDashboardData() {
+    try {
+        // Fetch the local JSON file
+        const response = await fetch('mockData.json');
+        const data = await response.json();
+        
+        // Example: Populate Screen 1 Table (Assuming you gave the tbody an ID)
+        // ... logic to inject data.recentRuns into the table ...
 
-    const options = {
-        ...chartBaseOptions,
-        series: [{
-            name: 'Equity',
-            data: [100, 105, 102, 110, 115, 114, 120, 125, 123, 130, 135, 133, 142]
-        }],
-        colors: ['#00d2ff'],
-        fill: {
-            type: 'gradient',
-            gradient: {
-                shadeIntensity: 1,
-                opacityFrom: 0.4,
-                opacityTo: 0.05,
-                stops: [0, 100]
-            }
-        }
-    };
-
-    equityChartInstance = new ApexCharts(document.querySelector("#equityChart"), options);
-    equityChartInstance.render();
+        // Example: Update Chart on Screen 4
+        renderEquityChart(data.runResults.chartData);
+    } catch (error) {
+        console.error("Error loading mock data:", error);
+    }
 }
+
 
 function renderCompareChart() {
     if (compareChartInstance) return;
@@ -137,6 +128,4 @@ function renderCompareChart() {
 }
 
 // Initialize first screen on load
-document.addEventListener('DOMContentLoaded', () => {
-    // We don't render charts immediately since screen 1 is active
-})
+document.addEventListener('DOMContentLoaded', loadDashboardData);
