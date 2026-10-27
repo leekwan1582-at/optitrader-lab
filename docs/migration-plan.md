@@ -4,6 +4,9 @@
 
 ## Final architecture
 
+- The original JS PoC remains in `03-hi-fi`; the TypeScript production candidate is `03-hi-fi-ts`.
+- `02-mid-fi` intentionally remains JavaScript.
+
 - React + Vite client with mock-data and live-API modes.
 - Node.js/Express backend using ES6 modules (`"type": "module"`).
 - Python 3.11/vectorbt engine spawned through `child_process`.
@@ -16,7 +19,8 @@
 
 - Built the React client under `prototypes/03-hi-fi/client/`: pages, components, API adapters, context, mock data and styling.
 - Built the Express server under `prototypes/03-hi-fi/server/`: routes, controllers, middleware, services, models, seed script and worker.
-- Converted all server JavaScript to ES6 modules (`import`/`export`); no CommonJS remains.
+- Converted all server JavaScript in the original PoC to ES6 modules (`import`/`export`); no CommonJS remains.
+- Created the self-contained TypeScript candidate in `prototypes/03-hi-fi-ts/` (client, server, engine, tests).
 - Added JWT auth, owner-scoped queries, Zod validation, rate limiting and error handling.
 - Added config validation and a demo seed user (`marcus@optitrader.dev` / `demo1234`).
 - Fixed Python engine issues found by the bridge test: index-frequency inference, MultiIndex parameter selection, non-finite JSON values and duplicate function definitions.
@@ -35,8 +39,8 @@
 
 ## Deferred / post-MVP
 
-- TypeScript migration of the client/server (the implementation uses ES6 JavaScript).
-- Redis queue, WebSocket progress streaming and S3 storage.
+- Production hardening of the TypeScript candidate (managed deployment, object storage, auth hardening).
+- Redis/BullMQ queue and WebSocket progress streaming (tracked in `docs/production-plan.md`).
 - EMA-specific engine algorithm (the UI exposes EMA; the Python engine currently runs the SMA path).
 - Standalone `user-guide.md`, `technical.md`, `api.md` and `CONTRIBUTING.md` (their content is covered by the high-fidelity README).
 - Walk-forward validation and deployment hardening.

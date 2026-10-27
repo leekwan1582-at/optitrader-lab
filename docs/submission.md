@@ -658,10 +658,13 @@ The Actual and Status columns are filled after you execute each test. ⏳
 | [`readme.md`](../readme.md) | Everyone | Project entry point, architecture, quick start and documentation map | ✅ |
 | [`docs/submission.md`](submission.md) | Instructors | Capstone report: LU1–LU6, mock data, tests, AI integration | ✅ |
 | [`docs/design_v01.md`](design_v01.md) | Instructors / developers | Technical design: features, architecture, schemas, security, deployment | ✅ |
+| [`docs/production-plan.md`](production-plan.md) | Developers | Production roadmap, managed deployment and TypeScript migration | ✅ |
 | [`prototypes/01-lo-fi/readme.md`](../prototypes/01-lo-fi/readme.md) | Instructors | Low-fidelity wireframes and early specification | ✅ |
 | [`prototypes/02-mid-fi/readme.md`](../prototypes/02-mid-fi/readme.md) | Reviewers | Medium-fidelity interactive prototype and mock data | ✅ |
 | [`prototypes/03-hi-fi/readme.md`](../prototypes/03-hi-fi/readme.md) | Developers | High-fidelity setup, API, browser walkthrough and troubleshooting | ✅ |
-| [`prototypes/03-hi-fi/test/readme.md`](../prototypes/03-hi-fi/test/readme.md) | Developers | Test-environment setup and procedure | ✅ |
+| [`prototypes/03-hi-fi/test/readme.md`](../prototypes/03-hi-fi/test/readme.md) | Developers | Original JS test-environment setup and procedure | ✅ |
+| [`prototypes/03-hi-fi-ts/readme.md`](../prototypes/03-hi-fi-ts/readme.md) | Developers | TypeScript production candidate setup and browser walkthrough | ✅ |
+| [`prototypes/03-hi-fi-ts/test/readme.md`](../prototypes/03-hi-fi-ts/test/readme.md) | Developers | TypeScript test-environment setup and procedure | ✅ |
 
 A standalone user guide, technical guide, API reference and `CONTRIBUTING.md` were deferred; their essential content is folded into the high-fidelity README and the documents above.
 
@@ -673,12 +676,15 @@ optitrader-lab/
 ├─ pytest.ini
 ├─ docs/
 │  ├─ submission.md              # Capstone report
-│  └─ design_v01.md              # Technical/design specification
+│  ├─ design_v01.md              # Technical/design specification
+│  └─ production-plan.md         # Production roadmap and TypeScript plan
 ├─ prototypes/
 │  ├─ 01-lo-fi/                  # Wireframes + low-fi readme
 │  ├─ 02-mid-fi/                 # Interactive HTML/CSS/ES6 prototype
-│  └─ 03-hi-fi/
-│     ├─ client/                 # React + Vite app
+│  ├─ 03-hi-fi/                  # Original JS PoC
+│  │  └─ ...
+│  └─ 03-hi-fi-ts/               # TypeScript production candidate
+│     ├─ client/                 # React + Vite + TypeScript app
 │     ├─ server/                 # Express API, models, services, worker
 │     ├─ engine/                 # Python/vectorbt engine
 │     ├─ test/                   # Python, bridge and Node tests
@@ -1063,7 +1069,8 @@ optitrader-lab/
 │
 └── docs/                                      # Documentation Inventory (LU5)[cite: 1]
     ├── submission.md                          # Capstone report (this document)
-    └── design_v01.md                          # Technical design and architecture
+    ├── design_v01.md                          # Technical design and architecture
+    └── production-plan.md                     # Production roadmap and TypeScript plan
 ```
 
 ## Appendix E: Submission Checklist

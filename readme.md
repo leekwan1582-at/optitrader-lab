@@ -34,16 +34,18 @@ optitrader-lab/
 ├── readme.md
 ├── docs/
 │   ├── submission.md             # Capstone report (LU1–LU6)
-│   └── design_v01.md             # Technical/design specification
+│   ├── design_v01.md             # Technical/design specification
+│   └── production-plan.md        # Production roadmap and TypeScript plan
 ├── prototypes/
 │   ├── 01-lo-fi/                 # Paper wireframes + low-fi proposal
-│   ├── 02-mid-fi/                # Interactive HTML/CSS/ES6 prototype
-│   └── 03-hi-fi/
-│       ├── client/               # React + Vite app
-│       ├── server/               # Express API, models, services, worker
+│   ├── 02-mid-fi/                # Interactive HTML/CSS/ES6 prototype (JS)
+│   ├── 03-hi-fi/                 # Original high-fidelity PoC (JS)
+│   └── 03-hi-fi-ts/              # TypeScript production candidate
+│       ├── client/               # React + Vite + TypeScript
+│       ├── server/               # Express + TypeScript
 │       ├── engine/               # Python/vectorbt backtest engine
 │       ├── test/                 # Python, bridge and Node tests
-│       └── readme.md             # High-fidelity setup + browser walkthrough
+│       └── readme.md             # TypeScript setup + browser walkthrough
 └── pytest.ini
 ```
 
@@ -61,7 +63,7 @@ optitrader-lab/
 No backend is required. The client uses bundled mock data and `localStorage`.
 
 ```bash
-cd prototypes/03-hi-fi/client
+cd prototypes/03-hi-fi-ts/client
 npm install
 cp .env.example .env
 npm run dev
@@ -79,7 +81,7 @@ Prerequisites: Node.js 18+, Python 3.11, MongoDB (local or Atlas), and a Gemini 
 
 ```bash
 # 1. Backend
-cd prototypes/03-hi-fi/server
+cd prototypes/03-hi-fi-ts/server
 npm install
 cp .env.example .env
 # edit .env: MONGO_URI, GEMINI_API_KEY, CLIENT_URL
@@ -88,7 +90,7 @@ npm run seed
 npm run dev
 
 # 2. Frontend (new terminal)
-cd prototypes/03-hi-fi/client
+cd prototypes/03-hi-fi-ts/client
 cp .env.example .env
 # set VITE_USE_MOCK_API=false
 npm run dev
@@ -99,16 +101,16 @@ API: `http://localhost:5000` · health check: `GET /api/health`.
 ## Tests
 
 ```bash
-# Node: config, domain and JS ↔ Python bridge tests
-cd prototypes/03-hi-fi/server
+# Node: config, domain and TypeScript ↔ Python bridge tests
+cd prototypes/03-hi-fi-ts/server
 npm test
 
-# Python engine
-cd ../../..
-pytest -v
+# Python engine (uses the copied engine + local pytest.ini)
+cd ..
+../../.venv/bin/python -m pytest -q
 ```
 
-See [`prototypes/03-hi-fi/test/readme.md`](prototypes/03-hi-fi/test/readme.md) for test-environment setup and troubleshooting.
+See [`prototypes/03-hi-fi-ts/test/readme.md`](prototypes/03-hi-fi-ts/test/readme.md) for test-environment setup and troubleshooting. The original JS PoC remains in `03-hi-fi/` with the same commands.
 
 ## Documentation map
 
@@ -116,16 +118,22 @@ See [`prototypes/03-hi-fi/test/readme.md`](prototypes/03-hi-fi/test/readme.md) f
 |---|---|
 | [`docs/submission.md`](docs/submission.md) | Capstone report: research, design, prototyping, mock data, testing, AI integration |
 | [`docs/design_v01.md`](docs/design_v01.md) | Technical design: features, architecture, schemas, security, deployment |
+| [`docs/production-plan.md`](docs/production-plan.md) | Production roadmap, managed deployment, TypeScript migration and Redis backlog |
 | [`prototypes/01-lo-fi/readme.md`](prototypes/01-lo-fi/readme.md) | Low-fidelity wireframes and early specification |
 | [`prototypes/02-mid-fi/readme.md`](prototypes/02-mid-fi/readme.md) | Medium-fidelity interactive prototype |
-| [`prototypes/03-hi-fi/readme.md`](prototypes/03-hi-fi/readme.md) | High-fidelity setup, API, browser walkthrough and troubleshooting |
-| [`prototypes/03-hi-fi/test/readme.md`](prototypes/03-hi-fi/test/readme.md) | Test environment and procedures |
+| [`prototypes/03-hi-fi/readme.md`](prototypes/03-hi-fi/readme.md) | Original high-fidelity PoC setup, API and troubleshooting (JS) |
+| [`prototypes/03-hi-fi-ts/readme.md`](prototypes/03-hi-fi-ts/readme.md) | TypeScript candidate setup and browser walkthrough |
+| [`prototypes/03-hi-fi-ts/test/readme.md`](prototypes/03-hi-fi-ts/test/readme.md) | TypeScript test environment and procedures |
+
+## Production roadmap
+
+See [`docs/production-plan.md`](docs/production-plan.md) for the managed Vercel + Render/Railway + Atlas target, Bearer JWT hardening, synchronous v1 execution and the Redis/BullMQ backlog.
 
 ## Known limitations (PoC)
 
 - The Python engine currently implements the SMA crossover path; the UI also exposes EMA momentum, but it is not a separate engine algorithm yet.
 - Seeded datasets without an uploaded CSV use a deterministic synthetic OHLCV file for local runs.
-- Runs execute synchronously through the child process; Redis queues, WebSocket progress and deployment hardening are post-MVP.
+- Runs execute synchronously through the child process. Redis/BullMQ queues, WebSocket progress and deployment hardening are tracked in the [production plan](docs/production-plan.md).
 - Gemini is optional at the service level; the assistant falls back to a local heuristic parser if the API is unavailable.
 - Historical data ingestion supports standard OHLCV CSV files only.
 

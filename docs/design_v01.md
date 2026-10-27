@@ -87,12 +87,12 @@ The system enables traders to focus on strategy research rather than manual expe
 
 | Area | Status |
 |---|---|
-| React client | Implemented with mock-data mode and live-API mode |
-| Express API | Implemented: JWT auth, dataset/profile/run CRUD, assistant, comparison |
+| React client | Implemented in JavaScript (`03-hi-fi`) and TypeScript (`03-hi-fi-ts`), with mock-data and live-API modes |
+| Express API | Implemented in JavaScript and TypeScript: JWT auth, dataset/profile/run CRUD, assistant, comparison |
 | MongoDB | Implemented with Mongoose models, owner-scoped queries and seed script |
 | Python engine | Implemented with `vectorbt`; SMA crossover path is active |
 | Gemini assistant | Function calling with local heuristic fallback |
-| Tests | Node config/domain tests, JS ↔ Python bridge tests, pytest engine tests |
+| Tests | Node config/domain tests, JS/TS ↔ Python bridge tests, pytest engine tests |
 | Post-MVP | Redis queue, S3 storage, WebSocket progress, EMA-specific engine, walk-forward validation |
 
 ---

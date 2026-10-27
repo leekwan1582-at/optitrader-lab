@@ -48,10 +48,12 @@ Thumbs.db
 # ---------- Data / outputs ----------
 data/uploads/
 prototypes/03-hi-fi/server/uploads/
+prototypes/03-hi-fi-ts/server/uploads/
 results/
 *.csv
 !engine/tests/fixtures/*.csv
 !prototypes/03-hi-fi/test/fixtures/*.csv
+!prototypes/03-hi-fi-ts/test/fixtures/*.csv
 
 # ---------- Mongo local dumps ----------
 dump/
