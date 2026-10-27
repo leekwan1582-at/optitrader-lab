@@ -1,20 +1,23 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const datasetSchema = new mongoose.Schema(
   {
     _id: { type: String, required: true },        // dataset_id
+    owner: { type: String, required: true, index: true },
     name: { type: String, required: true },
     symbol: { type: String, required: true },
     timeframe: { type: String, required: true },
     date_range: { type: String, required: true },
     rows: { type: Number, required: true },
+    file_ref: { type: String },
+    original_filename: { type: String },
     status: {
       type: String,
       enum: ['validated', 'pending', 'invalid'],
       default: 'pending',
     },
   },
-  { timestamps: true, _id: false }
+  { timestamps: true, _id: false, toJSON: { transform: (doc, ret) => { ret.dataset_id = ret._id; return ret; } } }
 );
 
-module.exports = mongoose.model('Dataset', datasetSchema);
+export default mongoose.model('Dataset', datasetSchema);

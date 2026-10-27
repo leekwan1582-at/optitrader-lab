@@ -1,5 +1,7 @@
 # OptiTrader Lab
 
+> **Status:** historical low-fidelity specification. The current implementation is the interactive prototype in [`../02-mid-fi/`](../02-mid-fi/readme.md) and the high-fidelity app in [`../03-hi-fi/`](../03-hi-fi/readme.md). Canonical documentation: [capstone report](../../docs/submission.md) and [technical design](../../docs/design_v01.md).
+
 ## Capstone Project Proposal & Design Documentation (Lo-Fi Prototype Edition)
 
 **BELLS SCTP Diploma in AI-Powered Software Engineering**  
@@ -39,7 +41,7 @@ The solution introduces a natural-language interface powered by Gemini Function 
 | Core Problem | Manual parameter tweaking and untracked optimization workflows |
 | Core Feature | Natural-language optimization assistant with experiment tracking |
 | AI Model | Google Gemini |
-| Stack | React · Node.js/Express · MongoDB · Gemini API |
+| Stack | React · Node.js/Express (ES6 modules) · MongoDB · Gemini API · Python 3.11/vectorbt |
 
 ---
 
@@ -413,6 +415,11 @@ a7ce004e    52bcf9c3     NQ_M15         120        Fail
 
 The high-fidelity PNG mockups are visual enhancements of these low-fidelity wireframes.
 
+Current implementation:
+
+- [`../02-mid-fi/`](../02-mid-fi/readme.md) — interactive HTML/CSS/ES6 prototype with mock data.
+- [`../03-hi-fi/`](../03-hi-fi/readme.md) — React + Vite client, Express API, MongoDB models and Python/vectorbt engine.
+
 Enhancements include:
 
 - Modern UI styling
@@ -432,22 +439,22 @@ The underlying workflows, features, and acceptance criteria remain unchanged.
 React Frontend
        |
        v
-Node.js / Express API
+Node.js / Express API (ES6 modules)
        |
        +-------- Gemini API
        |
        +-------- MongoDB
        |
-       +-------- Worker Thread
-                    |
-                    v
-           Optimization Engine
-                    |
-                    v
+       +-------- Node orchestrator (child_process)
+                     |
+                     v
+           Python 3.11 / vectorbt engine
+                     |
+                     v
              Experiment Log
-                    |
-                    v
-             Analytics Layer
+                     |
+                     v
+              Analytics Layer
 ```
 
 ---

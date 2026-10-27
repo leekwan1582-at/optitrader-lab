@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const robustnessSchema = new mongoose.Schema(
   {
@@ -15,8 +15,12 @@ const robustnessSchema = new mongoose.Schema(
 const runSchema = new mongoose.Schema(
   {
     _id: { type: String, required: true },        // run_id
+    owner: { type: String, required: true, index: true },
     profile_id: { type: String, required: true, ref: 'Profile' },
     dataset_id: { type: String, required: true, ref: 'Dataset' },
+    run_hash: { type: String, index: true },
+    config: { type: mongoose.Schema.Types.Mixed },
+    profile_snapshot: { type: mongoose.Schema.Types.Mixed },
     status: {
       type: String,
       enum: ['completed', 'failed', 'running', 'queued'],
@@ -29,9 +33,11 @@ const runSchema = new mongoose.Schema(
     best: { type: mongoose.Schema.Types.Mixed },
     robustness: { type: robustnessSchema },
     equity_curve: { type: [Number], default: [] },
+    ai_summary: { type: mongoose.Schema.Types.Mixed },
     error_code: { type: String },
+    error_message: { type: String },
   },
-  { timestamps: false, _id: false }
+  { timestamps: false, _id: false, toJSON: { transform: (doc, ret) => { ret.run_id = ret._id; return ret; } } }
 );
 
-module.exports = mongoose.model('Run', runSchema);
+export default mongoose.model('Run', runSchema);

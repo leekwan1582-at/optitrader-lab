@@ -1,5 +1,6 @@
 import sys
 import json
+import math
 import warnings
 from typing import Dict, Any, Tuple, List, Optional
 import numpy as np
@@ -7,6 +8,15 @@ import pandas as pd
 import vectorbt as vbt
 
 warnings.filterwarnings('ignore')
+
+
+def safe_float(value: Any, fallback: float = 0.0) -> float:
+    """Convert numpy/pandas scalars to finite JSON-safe floats."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return number if math.isfinite(number) else fallback
 
 def parse_args(args: List[str]) -> Tuple[str, Dict[str, Any]]:
     """
@@ -47,8 +57,6 @@ def load_data(csv_path: str) -> pd.DataFrame:
     Raises:
         SystemExit: If the file is missing, unreadable, or missing required columns.
     """
-def load_data(csv_path: str) -> pd.DataFrame:
-    # ... (keep docstring) ...
     try:
         df = pd.read_csv(csv_path)
         
@@ -67,6 +75,25 @@ def load_data(csv_path: str) -> pd.DataFrame:
     except Exception as e:
         print(json.dumps({"error": f"Data loading failed: {str(e)}"}), file=sys.stderr)
         sys.exit(1)
+
+def infer_index_freq(index: pd.Index) -> Optional[Any]:
+    """Infer a usable frequency for vectorbt annualization."""
+    if not isinstance(index, pd.DatetimeIndex) or len(index) < 2:
+        return None
+
+    inferred = pd.infer_freq(index)
+    if inferred:
+        return inferred
+
+    deltas = index.to_series().diff().dropna()
+    if deltas.empty:
+        return None
+
+    median_delta = deltas.median()
+    if pd.isna(median_delta) or median_delta <= pd.Timedelta(0):
+        return None
+    return median_delta
+
 
 def run_sma_crossover(df: pd.DataFrame, config: Dict[str, Any]) -> Tuple[vbt.Portfolio, np.ndarray, np.ndarray]:
     """
@@ -113,7 +140,8 @@ def run_sma_crossover(df: pd.DataFrame, config: Dict[str, Any]) -> Tuple[vbt.Por
     exits = fast_ma.ma_crossed_below(slow_ma)
     
     fees = float(config.get('transaction_costs', 0.0))
-    pf = vbt.Portfolio.from_signals(close, entries, exits, fees=fees)
+    freq = infer_index_freq(close.index)
+    pf = vbt.Portfolio.from_signals(close, entries, exits, fees=fees, freq=freq)
     
     return pf, fast_windows, slow_windows
 
@@ -132,7 +160,7 @@ def extract_results(pf: vbt.Portfolio, fast_windows: np.ndarray, slow_windows: n
     """
     sharpe = pf.sharpe_ratio()
     total_return = pf.total_return()
-    max_dd = pf.max_drawdown()
+    max_dd = pf.max_drawdown().abs()
     win_rate = pf.trades.win_rate()
     profit_factor = pf.trades.profit_factor()
     total_trades = pf.trades.count()
@@ -163,18 +191,35 @@ def extract_results(pf: vbt.Portfolio, fast_windows: np.ndarray, slow_windows: n
     
     # Handle single vs multiple combinations indexing
     if isinstance(best_idx, tuple):
-        best_fast = fast_windows[best_idx[0]]
-        best_slow = slow_windows[best_idx[1]]
+        # MultiIndex labels are (fast_window, slow_window), not positions.
+        best_fast = best_idx[0]
+        best_slow = best_idx[1]
     else:
         best_fast = fast_windows[best_idx]
         best_slow = slow_windows[best_idx]
 
-    equity_curve = best_pf.value().resample('W').last().dropna()
-    
-    curve_data = [
-        {"date": date.strftime("%Y-%m-%d"), "value": round(float(value), 2)}
-        for date, value in equity_curve.items()
-    ]
+    equity_curve = best_pf.value()
+    if isinstance(equity_curve.index, pd.DatetimeIndex):
+        try:
+            equity_curve = equity_curve.resample('W').last().dropna()
+        except ValueError:
+            # Irregular or frequency-less timestamps cannot be resampled.
+            step = max(1, len(equity_curve) // 30)
+            equity_curve = equity_curve.iloc[::step]
+    else:
+        step = max(1, len(equity_curve) // 30)
+        equity_curve = equity_curve.iloc[::step]
+
+    if isinstance(equity_curve.index, pd.DatetimeIndex):
+        curve_data = [
+            {"date": date.strftime("%Y-%m-%d"), "value": round(safe_float(value), 2)}
+            for date, value in equity_curve.items()
+        ]
+    else:
+        curve_data = [
+            {"date": str(index), "value": round(safe_float(value), 2)}
+            for index, value in equity_curve.items()
+        ]
 
     return {
         "status": "success",
@@ -183,12 +228,12 @@ def extract_results(pf: vbt.Portfolio, fast_windows: np.ndarray, slow_windows: n
             "slow_ma": int(best_slow)
         },
         "metrics": {
-            "sharpe_ratio": round(float(best_metrics['sharpe']), 2),
-            "total_return": round(float(best_metrics['total_return']) * 100, 2),
-            "max_drawdown": round(float(best_metrics['max_drawdown']) * 100, 2),
-            "win_rate": round(float(best_metrics['win_rate']) * 100, 2),
-            "profit_factor": round(float(best_metrics['profit_factor']), 2),
-            "total_trades": int(best_metrics['total_trades'])
+            "sharpe_ratio": round(safe_float(best_metrics['sharpe']), 2),
+            "total_return": round(safe_float(best_metrics['total_return']) * 100, 2),
+            "max_drawdown": round(abs(safe_float(best_metrics['max_drawdown'])) * 100, 2),
+            "win_rate": round(safe_float(best_metrics['win_rate']) * 100, 2),
+            "profit_factor": round(safe_float(best_metrics['profit_factor']), 2),
+            "total_trades": int(safe_float(best_metrics['total_trades']))
         },
         "equity_curve": curve_data
     }
@@ -201,7 +246,7 @@ def main() -> None:
     try:
         pf, fast_win, slow_win = run_sma_crossover(df, config)
         results = extract_results(pf, fast_win, slow_win, config)
-        print(json.dumps(results))
+        print(json.dumps(results, allow_nan=False))
     except Exception as e:
         print(json.dumps({"error": str(e)}), file=sys.stderr)
         sys.exit(1)

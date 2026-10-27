@@ -1,22 +1,26 @@
 // server/seed.js
-require('dotenv').config();
+import 'dotenv/config';
 
-const fs = require('fs');
-const path = require('path');
-const mongoose = require('mongoose');
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import bcrypt from 'bcryptjs';
+import mongoose from 'mongoose';
 
-const connectDB = require('./database');
-const Workspace = require('./models/Workspace');
-const Dataset = require('./models/Dataset');
-const Profile = require('./models/Profile');
-const Run = require('./models/Run');
-const ErrorLog = require('./models/ErrorLog');
-const Setting = require('./models/Setting');
+import connectDB from './database.js';
+import User from './models/User.js';
+import Workspace from './models/Workspace.js';
+import Dataset from './models/Dataset.js';
+import Profile from './models/Profile.js';
+import Run from './models/Run.js';
+import ErrorLog from './models/ErrorLog.js';
+import Setting from './models/Setting.js';
+
+const DEMO_EMAIL = 'marcus@optitrader.dev';
+const DEMO_PASSWORD = 'demo1234';
 
 // Adjust if your folder layout differs
-const MOCK_DATA_PATH = path.resolve(
-  __dirname,
-  '../../02-mid-fi/mockData.json'
+const MOCK_DATA_PATH = fileURLToPath(
+  new URL('../../02-mid-fi/mockData.json', import.meta.url)
 );
 
 async function seed() {
@@ -31,6 +35,21 @@ async function seed() {
 
   // 2. Connect
   await connectDB();
+
+  // 2a. Demo user
+  const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 12);
+  const user = await User.findOneAndUpdate(
+    { email: DEMO_EMAIL },
+    {
+      email: DEMO_EMAIL,
+      name: 'Marcus Lim',
+      passwordHash,
+      workspaceName: data.workspace?.name || 'Marcus_Lim_Research',
+    },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  );
+  const owner = user._id.toString();
+  console.log(`  ✅ Demo user: ${DEMO_EMAIL} / ${DEMO_PASSWORD}`);
 
   // 3. Wipe existing collections (idempotent re-seed)
   console.log('🧹 Clearing existing collections...');
@@ -49,6 +68,7 @@ async function seed() {
   if (data.workspace) {
     await Workspace.create({
       _id: data.workspace.workspace_id,
+      user: owner,
       name: data.workspace.name,
       owner: data.workspace.owner,
     });
@@ -59,6 +79,7 @@ async function seed() {
   if (Array.isArray(data.datasets) && data.datasets.length) {
     const datasetDocs = data.datasets.map((d) => ({
       _id: d.dataset_id,
+      owner,
       name: d.name,
       symbol: d.symbol,
       timeframe: d.timeframe,
@@ -74,6 +95,7 @@ async function seed() {
   if (Array.isArray(data.profiles) && data.profiles.length) {
     const profileDocs = data.profiles.map((p) => ({
       _id: p.profile_id,
+      owner,
       name: p.name,
       strategy_type: p.strategy_type,
       objective: p.objective,
@@ -88,6 +110,7 @@ async function seed() {
   if (Array.isArray(data.runs) && data.runs.length) {
     const runDocs = data.runs.map((r) => ({
       _id: r.run_id,
+      owner,
       profile_id: r.profile_id,
       dataset_id: r.dataset_id,
       status: r.status,
@@ -107,6 +130,7 @@ async function seed() {
   // 4e. Error logs
   if (Array.isArray(data.error_logs) && data.error_logs.length) {
     const logDocs = data.error_logs.map((l) => ({
+      owner,
       severity: l.severity,
       timestamp: new Date(l.timestamp),
       component: l.component,

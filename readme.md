@@ -1,70 +1,134 @@
-### Phase 1: Scaffolding & Setup Documentation (Day 1-2)
-Your folder structure is solid. Before building features, set up the skeleton.
+# OptiTrader Lab
 
-1. **Initialize the Repo**: Create a root `03-hi-fi` folder and initialize a monorepo or separate folders for `client` and `server`.
-2. **Base `README.md`**:
-   * Prerequisites (Node.js vX, MongoDB, Gemini API Key).
-   * Installation steps (`npm install` in both client and server).
-   * Environment Variables template (create a `.env.example` file in both folders).
-   * How to run (e.g., `npm run dev`).
-3. **Environment Setup**:
-   * **Client**: React + Vite + react-bootstrape
-   * **Server**: Node.js + Express. Add standard middleware (`cors`, `dotenv`, `express.json`).
+**Research · Optimize · Validate · Deploy**
 
-### Phase 2: Database Modeling & Mock Data (Day 3-4)
-Looking at the mockups (specifically the Experiment Log, Dashboard, and Results Analytics), start defining your MongoDB schemas using Mongoose.
+OptiTrader Lab is an AI-assisted strategy optimization platform for solo quantitative traders. It turns parameter tuning into tracked, reproducible experiments with a React dashboard, an Express API, and a Python/vectorbt backtesting engine.
 
-*   `User.js`: id, email, passwordHash, workspaceName.
-*   `Dataset.js`: id, userId, name, symbol, timeframe, dateRange, rowCount, validationStatus.
-*   `Experiment.js` (Crucial): id, runHash, strategy, datasetId, configuration (JSON object), trialsCount, metrics (Sharpe, Max DD, Win Rate), status (Running, Completed, Failed), createdAt.
-*   `StrategyProfile.js`: id, name, strategyType, defaultParams.
+## Current status
 
-*Tip: Write a seeder script (`seed.js`) to populate your database with the mock data exactly as seen in your screenshots so you can build the UI immediately without waiting for the backend worker to finish.*
+- **High-fidelity PoC implemented:** React + Vite client, Express API, MongoDB models, JWT auth, Gemini assistant, and Python bridge.
+- **Standalone demo available:** the client runs from local mock data by default (`VITE_USE_MOCK_API=true`).
+- **Live API available:** seed MongoDB, start the server, and switch the client to the live API.
+- **Documentation:** this file is the entry point; the detailed design and capstone report are in [`docs/`](docs/).
 
-### Phase 3: Backend API & Worker Thread (Day 5-8)
-Build the Express API to serve the data.
+## Architecture
 
-*   **Routes**: `authRoutes`, `datasetRoutes`, `experimentRoutes`.
-*   **The Worker (`workers/backtestWorker.js`)**: This is a key technical differentiator. Use Node.js `worker_threads`. When the user hits "Launch Run", the main Express thread should spawn a worker to run the parameter sweep. The worker communicates progress (e.g., "54 / 500 trials") back to the main thread, which you can either save to DB or push via WebSockets/Server-Sent Events (SSE) to the client.
-*   **Gemini Service (`services/assistantService.js`)**: Start by mocking the function calling. Just return the JSON structure from your design doc. Once the UI is working, swap in the actual Gemini API using the `@google/genai` SDK.
+```text
+React + Vite client
+        │  REST / JWT
+        ▼
+Node.js + Express API (ES modules)
+        │
+        ├── MongoDB (Mongoose)
+        ├── Gemini API (@google/genai, optional fallback)
+        └── Node worker → Python 3.11 / vectorbt
+                              │
+                              ▼
+                        JSON metrics + equity curve
+```
 
-### Phase 4: Frontend - Component Library (Day 9-11)
-Don't build page by page. Build components first, based on your mockups:
-*   `Sidebar.jsx` (Navigation with active states).
-*   `KPICard.jsx` (The metric cards showing Sharpe 1.18, Total Return 42%, etc. with the little sparkline/bar charts).
-*   `DataTable.jsx` (For the Active Datasets, Recent Experiments, and Experiment Log).
-*   `StatusBadge.jsx` (Completed, Running, Failed).
-*   `ChartWrapper.jsx` (Using Recharts or Chart.js for the Equity Curve).
+## Repository layout
 
-### Phase 5: Frontend - Views & Routing (Day 12-15)
-Connect React Router to your components.
-1.  **Login Page**: Simple UI.
-2.  **Dashboard**: Quick Run input, Recent Experiments table, Activity Feed.
-3.  **New Experiment (Studio)**: The split-pane layout. AI prompt on top, parameter configuration below.
-4.  **Results Analytics**: The complex view with the Equity Curve, Drawdown Analysis, and AI Synthesis tabs.
-5.  **Comparison**: The overlay chart and metrics matrix.
+```text
+optitrader-lab/
+├── readme.md
+├── docs/
+│   ├── submission.md             # Capstone report (LU1–LU6)
+│   └── design_v01.md             # Technical/design specification
+├── prototypes/
+│   ├── 01-lo-fi/                 # Paper wireframes + low-fi proposal
+│   ├── 02-mid-fi/                # Interactive HTML/CSS/ES6 prototype
+│   └── 03-hi-fi/
+│       ├── client/               # React + Vite app
+│       ├── server/               # Express API, models, services, worker
+│       ├── engine/               # Python/vectorbt backtest engine
+│       ├── test/                 # Python, bridge and Node tests
+│       └── readme.md             # High-fidelity setup + browser walkthrough
+└── pytest.ini
+```
 
-### Phase 6: Connect, Polish & Document (Day 16+)
-*   Connect your React frontend to your Express backend.
-*   Wire up the Gemini API for real.
-*   Implement the `backtestWorker.js` to actually process a CSV and run a simple SMA crossover (even if it just returns mocked metrics based on the CSV length for the PoC, as long as the *pipeline* works).
-*   **Finalize Documentation**: Now update your `README.md` with actual screenshots, your architecture diagram, and a "Challenges & Learnings" section for your capstone report.
+## Prerequisites
 
----
+| Requirement | Needed for |
+|---|---|
+| Node.js 18+ | Client and server |
+| Python 3.11 + `vectorbt` | Backtest engine and bridge tests |
+| MongoDB (local or Atlas) | Live API mode |
+| Google Gemini API key | Live API startup and assistant (local fallback if API calls fail) |
 
-### A few technical recommendations for this specific stack:
+## Quick start — standalone demo
 
-1.  **Charting**: For those beautiful equity curves and drawdown charts, use **Recharts** or **Chart.js**. They integrate perfectly with React and support the tooltips and crosshairs shown in your mockups.
-2.  **CSV Parsing**: For the dataset manager, use `papaparse` on the frontend to preview the CSV, and `csv-parser` on the backend to process it.
-3.  **The AI Assistant**: In your mockup, it shows "Gemini 1.5 Pro". Make sure you use the modern `@google/genai` SDK (the older `@google/generative-ai` is deprecated). Use **Function Calling** heavily here. The AI shouldn't write the backtest; it should just return a JSON object of parameters (as you correctly showed in your design doc).
+No backend is required. The client uses bundled mock data and `localStorage`.
 
-### Do you need a separate Setup Document?
-No, keep it all in the root `README.md`. Your graders and future you will appreciate a single source of truth. Just make sure it includes:
-*   **Prerequisites**
-*   **Environment Setup** (`.env` keys needed)
-*   **Installation Steps**
-*   **How to Run (Local)**
-*   **Architecture Overview** (briefly)
-*   **Known Limitations** (e.g., "Backtesting engine currently supports only SMA/EMA for PoC").
+```bash
+cd prototypes/03-hi-fi/client
+npm install
+cp .env.example .env
+npm run dev
+```
 
-You have a phenomenal blueprint. The hardest part (the design and problem definition) is done. Now just start with `npm create vite@latest` and build out that UI piece by piece. Good luck with the capstone!
+Open `http://localhost:5173`. The demo login is pre-filled:
+
+```text
+marcus@optitrader.dev / demo1234
+```
+
+## Quick start — live API
+
+Prerequisites: Node.js 18+, Python 3.11, MongoDB (local or Atlas), and a Gemini API key.
+
+```bash
+# 1. Backend
+cd prototypes/03-hi-fi/server
+npm install
+cp .env.example .env
+# edit .env: MONGO_URI, GEMINI_API_KEY, CLIENT_URL
+npm run config:check
+npm run seed
+npm run dev
+
+# 2. Frontend (new terminal)
+cd prototypes/03-hi-fi/client
+cp .env.example .env
+# set VITE_USE_MOCK_API=false
+npm run dev
+```
+
+API: `http://localhost:5000` · health check: `GET /api/health`.
+
+## Tests
+
+```bash
+# Node: config, domain and JS ↔ Python bridge tests
+cd prototypes/03-hi-fi/server
+npm test
+
+# Python engine
+cd ../../..
+pytest -v
+```
+
+See [`prototypes/03-hi-fi/test/readme.md`](prototypes/03-hi-fi/test/readme.md) for test-environment setup and troubleshooting.
+
+## Documentation map
+
+| Document | Purpose |
+|---|---|
+| [`docs/submission.md`](docs/submission.md) | Capstone report: research, design, prototyping, mock data, testing, AI integration |
+| [`docs/design_v01.md`](docs/design_v01.md) | Technical design: features, architecture, schemas, security, deployment |
+| [`prototypes/01-lo-fi/readme.md`](prototypes/01-lo-fi/readme.md) | Low-fidelity wireframes and early specification |
+| [`prototypes/02-mid-fi/readme.md`](prototypes/02-mid-fi/readme.md) | Medium-fidelity interactive prototype |
+| [`prototypes/03-hi-fi/readme.md`](prototypes/03-hi-fi/readme.md) | High-fidelity setup, API, browser walkthrough and troubleshooting |
+| [`prototypes/03-hi-fi/test/readme.md`](prototypes/03-hi-fi/test/readme.md) | Test environment and procedures |
+
+## Known limitations (PoC)
+
+- The Python engine currently implements the SMA crossover path; the UI also exposes EMA momentum, but it is not a separate engine algorithm yet.
+- Seeded datasets without an uploaded CSV use a deterministic synthetic OHLCV file for local runs.
+- Runs execute synchronously through the child process; Redis queues, WebSocket progress and deployment hardening are post-MVP.
+- Gemini is optional at the service level; the assistant falls back to a local heuristic parser if the API is unavailable.
+- Historical data ingestion supports standard OHLCV CSV files only.
+
+## License
+
+Part of a Capstone submission for the BELLS SCTP Diploma in AI-Powered Software Engineering. Not intended for commercial use without permission.

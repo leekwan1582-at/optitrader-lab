@@ -16,7 +16,7 @@
 | Target audience | Solo systematic traders and quant developers who backtest in Python and tune parameters by hand |
 | Core problem | Manual parameter tweaking and ad-hoc optimization scripts are tedious, error-prone, untraceable and hard to trust |
 | Core feature | A natural-language assistant (Gemini function calling) that configures and launches optimization runs, backed by a tracked history of every run |
-| Stack | React · Node.js/Express with a worker thread for backtests · MongoDB (Mongoose) · Google Gemini API |
+| Stack | React · Node.js/Express (ES6 modules) with a Python 3.11/vectorbt engine · MongoDB (Mongoose) · Google Gemini API |
 
 ### 0.1 Learning-outcome traceability
 
@@ -265,7 +265,7 @@ One story per Must Have feature (F7 added as a Should).
 
 **US6 (F6): Natural-language assistant.** *As a quant developer, I want to type my optimization goal in plain English, so that the system configures and runs the optimization for me.*
 
-- **Given** I am on the dashboard, **when** I type “Optimize SMA crossover for max Sharpe under 15% drawdown on EURUSD”, **then** the assistant calls the `run_optimization_job` tool, the backend validates the arguments, creates the job and shows a loading state.
+- **Given** I am on the dashboard, **when** I type “Optimize SMA crossover for max Sharpe under 15% drawdown on EURUSD”, **then** the assistant calls the `create_optimization_config` tool, the backend validates the arguments, creates the job and shows a loading state.
 - **Given** my request lacks a strategy, dataset or objective, **then** the assistant asks one clarifying question instead of guessing.
 - **Given** the run completes, **then** I see the equity curve and a plain-English summary that states how many combinations were tested.
 - **Given** the AI returns invalid arguments or the API fails, **then** I see an error message and no job is created.
@@ -307,8 +307,8 @@ One story per Must Have feature (F7 added as a Should).
 | Fidelity | Method / tool | Purpose |
 | --- | --- | --- |
 | Low | Paper sketches (5 screens), photographed | Explore layout and flow cheaply |
-| Medium | **Interactive Web Prototype (`HTML5 / CSS3 / JavaScript`)** | alidate navigation flows, component states, and form inputs directly in a browser before backend integration. |
-| High | Windsurf with generative AI: React + Express + backtest worker thread + Gemini | Demonstrate feasibility (proof of concept) |
+| Medium | **Interactive Web Prototype (`HTML5 / CSS3 / ES6 JavaScript`)** | Validate navigation flows, component states, and form inputs directly in a browser before backend integration. |
+| High | Windsurf with generative AI: React + Express (ES6 modules) + Python/vectorbt engine + Gemini | Demonstrate feasibility (proof of concept) |
 |  |  |  |
 
 ### 3.2 Low-fidelity sketches (Phase 2)
@@ -493,8 +493,8 @@ a7ce004e    52bcf9c3     NQ_M15         120        Fail
 
 ### 3.3 Medium-fidelity mockup (Phase 3)
 
-Rather than a vector design tool, an interactive client-side web prototype was developed using HTML5, modern CSS, and vanilla JavaScript (`index.html`, `style.css`, `script.js`). It connects all sixcore screens (Login,, Dashboard, NL Prompt Studio, Dataset Manager, Results View, and Run Comparison) via event listeners and class toggling. Mock data is used to simulate the natural-language parsing and backtest results.   
-📎 *Evidence:* Local folder `/prototype` hosted via GitHub Pages, with screenshots of active screen transitions and peer feedback log.
+Rather than a vector design tool, an interactive client-side web prototype was developed using HTML5, modern CSS, and ES6 JavaScript (`index.html`, `stylesheet.css`, `script.js`). It connects all six core screens (Login, Dashboard, NL Prompt Studio, Dataset Manager, Results View, and Run Comparison) via navigation helpers and class toggling. Mock data is used to simulate the natural-language parsing and backtest results.
+📎 *Evidence:* Local folder `prototypes/02-mid-fi/`, served with a static HTTP server, with screenshots of active screen transitions and peer feedback log.
 
 ### 3.4 High-fidelity proof of concept (Phase 4)
 
@@ -502,7 +502,7 @@ Built with Windsurf and generative AI, one feature at a time (auth, then data up
 
 - “Generate a React component with a text area for an AI prompt, a submit button, a loading skeleton and an area that shows a structured JSON response.”
 - “Create an Express route that accepts a CSV upload, validates required columns with Zod and stores metadata in MongoDB.”
-- “Write a JavaScript function that runs an SMA crossover backtest over a parameter grid using typed arrays and returns Sharpe, total return and max drawdown.”
+- “Write a Python function that runs an SMA crossover backtest over a parameter grid using vectorbt and returns Sharpe, total return and max drawdown.”
 
 📎 Add repository link and screenshots.
 
@@ -630,7 +630,7 @@ The Actual and Status columns are filled after you execute each test. ⏳
 | TC-14 | F3 | Edge | No parameter set satisfies the constraint | 1. Run with a drawdown limit of 0.01. | Run completes; message says no set met the constraint and shows the closest |  | Pending |
 | TC-15 | F6 | Error path | Gemini API returns 429 or times out | 1. Simulate the failure. 2. Submit a prompt. | Three retries with exponential backoff, then a friendly unavailable message; no job created |  | Pending |
 | TC-16 | F6 | Error path | AI returns arguments that fail schema validation | 1. Mock a malformed tool call. | Error shown; no job created; no silent default used |  | Pending |
-| TC-17 | F3 | Error path | Worker exceeds 120 seconds | 1. Run an oversized job (or lower the timeout in test). | Worker thread terminated; run marked failed with TIMEOUT; log entry kept |  | Pending |
+| TC-17 | F3 | Error path | Worker exceeds 120 seconds | 1. Run an oversized job (or lower the timeout in test). | Python process terminated; run marked failed with TIMEOUT; log entry kept |  | Pending |
 | TC-18 | F4 | Edge | Delete a run while it is running | 1. Start a job. 2. Click Delete. | Blocked with a 409 message |  | Pending |
 | TC-19 | All | Error path | Database unavailable | 1. Stop MongoDB. 2. Load the dashboard. | Friendly 503 message; no stack trace shown |  | Pending |
 | TC-20 | F6 | UI | Loading and completion feedback | 1. Submit a prompt. 2. Watch the page. | Skeleton loader during processing; toast and status badge on completion |  | Pending |
@@ -653,28 +653,40 @@ The Actual and Status columns are filled after you execute each test. ⏳
 
 ### 5.1 Documentation inventory
 
-| Document | Audience | Purpose | Priority | AI use | Status |
-| --- | --- | --- | --- | --- | --- |
-| `README.md` | Everyone | Overview, features, setup, usage, licence | High | Draft from project details | ⏳ |
-| `docs/user-guide.md` | End users | How to upload data, write prompts, read results | High | Step-by-step tutorial with screenshot placeholders | ⏳ |
-| `docs/technical.md` | Developers | Architecture, schemas, setup, key functions | High | Explain architecture from file structure and code | ⏳ |
-| `docs/design.md` | Instructors | Synthesis of LU1 and LU2 (problem, research, features, stories) | High | Synthesize from this proposal | ⏳ |
-| `docs/api.md` | Developers | Endpoints, request and response formats | Medium | Generate from route files | ⏳ |
-| `CONTRIBUTING.md` | Contributors | How to help, commit convention | Low | Improve clarity and tone | ⏳ |
+| Document | Audience | Purpose | Status |
+| --- | --- | --- | --- |
+| [`readme.md`](../readme.md) | Everyone | Project entry point, architecture, quick start and documentation map | ✅ |
+| [`docs/submission.md`](submission.md) | Instructors | Capstone report: LU1–LU6, mock data, tests, AI integration | ✅ |
+| [`docs/design_v01.md`](design_v01.md) | Instructors / developers | Technical design: features, architecture, schemas, security, deployment | ✅ |
+| [`prototypes/01-lo-fi/readme.md`](../prototypes/01-lo-fi/readme.md) | Instructors | Low-fidelity wireframes and early specification | ✅ |
+| [`prototypes/02-mid-fi/readme.md`](../prototypes/02-mid-fi/readme.md) | Reviewers | Medium-fidelity interactive prototype and mock data | ✅ |
+| [`prototypes/03-hi-fi/readme.md`](../prototypes/03-hi-fi/readme.md) | Developers | High-fidelity setup, API, browser walkthrough and troubleshooting | ✅ |
+| [`prototypes/03-hi-fi/test/readme.md`](../prototypes/03-hi-fi/test/readme.md) | Developers | Test-environment setup and procedure | ✅ |
+
+A standalone user guide, technical guide, API reference and `CONTRIBUTING.md` were deferred; their essential content is folded into the high-fidelity README and the documents above.
 
 ### 5.2 Repository structure
 
 ```
 optitrader-lab/
-├─ README.md
-├─ CONTRIBUTING.md
-├─ .env.example            # GEMINI_API_KEY, GEMINI_MODEL, MONGODB_URI, JWT_SECRET
+├─ readme.md
+├─ pytest.ini
 ├─ docs/
-│  ├─ design.md  user-guide.md  technical.md  api.md
-│  └─ images/              # real screenshots (no placeholders at submission)
-├─ client/                 # React app
-└─ server/                 # Express API, models, assistant service, backtest worker thread
+│  ├─ submission.md              # Capstone report
+│  └─ design_v01.md              # Technical/design specification
+├─ prototypes/
+│  ├─ 01-lo-fi/                  # Wireframes + low-fi readme
+│  ├─ 02-mid-fi/                 # Interactive HTML/CSS/ES6 prototype
+│  └─ 03-hi-fi/
+│     ├─ client/                 # React + Vite app
+│     ├─ server/                 # Express API, models, services, worker
+│     ├─ engine/                 # Python/vectorbt engine
+│     ├─ test/                   # Python, bridge and Node tests
+│     └─ readme.md
+└─ .gitignore
 ```
+
+Environment templates live in `prototypes/03-hi-fi/client/.env.example` and `prototypes/03-hi-fi/server/.env.example`. Uploaded/synthetic CSVs are written to `prototypes/03-hi-fi/server/uploads/` (git-ignored).
 
 ### 5.3 Documentation prompts (log in Appendix A)
 
@@ -684,16 +696,18 @@ optitrader-lab/
 
 ⏳ Refine at least one document with a second AI pass (clarity, tone, completeness) and note what changed.
 
+The user-guide, technical, API and contributing docs were deferred; the working setup, API and browser-testing guidance lives in the high-fidelity README instead.
+
 ### 5.4 Conventional Commits (AI-generated, human-reviewed)
 
 Format: `type(scope): short description`, then an optional body. Use the “from description” method for small changes and the “from diff” method (paste `git diff --staged`) for larger ones. The examples below show the style; ⏳ replace them with your real commit history.
 
 | Type | Example message | Body |
 | --- | --- | --- |
-| feat | `feat(assistant): add run_optimization_job function calling` | Defines the tool declaration, validates arguments with Zod and creates the job document |
+| feat | `feat(assistant): add create_optimization_config function calling` | Defines the tool declaration, validates arguments with Zod and creates the job document |
 | feat | `feat(data): add CSV upload with OHLCV validation` | Rejects missing columns and duplicate timestamps; stores dataset metadata |
 | fix | `fix(api): retry Gemini calls with exponential backoff` | Retries 429 and 5xx up to 3 times; returns a friendly error afterwards |
-| fix | `fix(worker): terminate backtest worker thread after 120s timeout` | Marks the run failed with TIMEOUT and keeps the log entry |
+| fix | `fix(worker): terminate the Python backtest process after the 120s timeout` | Marks the run failed with TIMEOUT and keeps the log entry |
 | docs | `docs(readme): add architecture overview and setup steps` | Adds the request-flow description and environment variable table |
 | test | `test(profiles): cover drawdown boundary values` | Adds cases for 0, 0.01, 1.0 and 1.01 |
 | refactor | `refactor(runs): extract trial-count logic into service` | No behaviour change |
@@ -701,7 +715,7 @@ Format: `type(scope): short description`, then an optional body. Use the “from
 ### 5.5 Documentation checklist
 
 - [ ]  `docs/` folder created and every file linked from the README
-- [ ]  Real screenshots replace all placeholders in the README and user guide
+- [ ]  Real screenshots replace all placeholders in the README and prototype documentation
 - [ ]  At least three commit types committed with AI-generated, convention-compliant messages
 - [ ]  Report section “AI-Assisted Documentation and Version Control” written (prompts, example commits, reflection, challenges)
 
@@ -713,54 +727,54 @@ Format: `type(scope): short description`, then an optional body. Use the “from
 
 | Layer | Technology | Responsibility |
 | --- | --- | --- |
-| Frontend | React (Vite), Recharts | Prompt box, forms, dashboards, polling and toasts |
-| API | Node.js, Express | Auth, validation, CRUD, assistant endpoint, job orchestration |
+| Frontend | React (Vite), ApexCharts | Prompt box, forms, dashboards, results and toasts |
+| API | Node.js (ES6 modules), Express | Auth, validation, CRUD, assistant endpoint, job orchestration |
 | Database | MongoDB with Mongoose | Users, datasets, profiles, runs, summaries |
-| Worker | Node.js worker thread (worker_threads) using typed arrays | CPU-bound backtests and grid search, kept off the main event loop |
+| Worker | Node.js orchestrator (`child_process`) spawning Python 3.11/vectorbt | Backtests and grid search kept off the Express event loop |
 | AI | Google Gemini API (via AI Studio) | Tool calling and structured summaries |
 
-**Single-language backend:** backtests run in a Node.js worker thread (`worker_threads`) so the Express event loop stays responsive. The server passes the validated job spec to the worker, receives results by message, limits concurrency to two jobs, and terminates the worker after 120 seconds. Only built-in strategy templates run, so no user-supplied code is ever executed. **Trade-off:** there is no pandas or NumPy, but two SMA/EMA templates over at most 500 combinations are fast enough with typed arrays. A Python worker remains a post-MVP option for richer strategies.
+**Node orchestrator + Python engine:** the Express API and worker orchestration use ES6 modules (`import`/`export`, `"type": "module"`). Backtests run in a Python 3.11 child process using `vectorbt`, so the Express event loop stays responsive. The server passes the validated job spec to the worker, parses a JSON result from stdout, and terminates the process after 120 seconds. Only built-in strategy templates run, so no user-supplied code is ever executed. **Trade-off:** the Python bridge adds a runtime dependency and process-management overhead, but it provides pandas/NumPy/vectorbt for realistic metrics and remains the implemented PoC engine.
 
 ### 6.2 Request flow
 
 1. The user types a goal in the assistant box; the frontend calls `POST /api/assistant` with the user’s JWT.
-2. The server sends the prompt, a system instruction and the user’s dataset list (names and IDs) to Gemini with the `run_optimization_job` tool declared.
-3. If the model needs more information, it replies with text; the UI shows it as a clarifying question and no job is created.
-4. Otherwise the model returns a function call. The server validates the arguments with Zod (types, ranges, combination cap, dataset ownership).
-5. On success the server creates an `OptimizationRun` (status queued) and returns the run ID and parsed grid to the UI immediately.
-6. The worker runs the grid search; the UI polls `GET /api/runs/:id` and shows a skeleton and progress.
-7. When the run finishes, the server sends the original function call and a function response containing the results back to Gemini, requesting a JSON summary.
-8. The summary (headline, findings, caveats, trial count) is stored on the run and displayed beside the equity curve.
+2. The server sends the prompt, a system instruction and the user’s dataset list (names and IDs) to Gemini with the `create_optimization_config` tool declared.
+3. If the model needs more information, it replies with text; the UI shows it as a clarifying question and no job is created. If Gemini is unavailable, the server falls back to a local heuristic parser.
+4. Otherwise the server validates the returned arguments with Zod (types, ranges, combination cap, dataset ownership) and returns the parsed grid to the UI.
+5. The UI submits the parsed configuration to `POST /api/runs`. The server creates a profile snapshot and an `OptimizationRun`, then runs the Python engine.
+6. The current PoC waits for the child process to finish and updates the run to `completed` or `failed` before responding. The UI opens the results page from that response.
+7. The run stores the best parameters, metrics, equity curve, robustness warnings and a locally generated AI-style summary. Redis queues and polled progress are post-MVP.
 
 ### 6.3 Data models and endpoints
 
 | Model | Main fields |
 | --- | --- |
-| User | email, passwordHash |
-| Dataset | owner, name, symbol, timeframe, rows, startDate, endDate, fileRef |
-| StrategyProfile | owner, name, strategyType, paramRanges, objective, maxDrawdownLimit |
-| OptimizationRun | owner, profile snapshot, dataset, status, trials, holdoutPct, best, results, summary, runHash, durationMs, errorCode |
+| User | name, email, passwordHash, workspaceName |
+| Dataset | owner, name, symbol, timeframe, date_range, rows, file_ref, status |
+| StrategyProfile | owner, name, strategy_type, objective, max_drawdown_limit, params |
+| OptimizationRun | owner, profile_id, dataset_id, config, status, trials, best, robustness, equity_curve, ai_summary, run_hash, duration_ms, error_code |
 
 | Method and path | Purpose |
 | --- | --- |
-| `POST /api/auth/register`, `POST /api/auth/login` | Accounts and JWT |
+| `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me` | Accounts and JWT |
 | `GET/POST/PUT/DELETE /api/profiles` | Profile CRUD (F1) |
 | `GET/POST/DELETE /api/datasets` | Data management (F2) |
 | `POST /api/runs`, `GET /api/runs`, `GET /api/runs/:id`, `DELETE /api/runs/:id` | Run engine and log (F3, F4) |
-| `POST /api/assistant` | Natural-language assistant (F6) |
+| `POST /api/assistant` | Natural-language assistant (F6), rate-limited |
 | `GET /api/runs/compare?ids=...` | Comparison data (F5) |
+| `GET /api/workspace`, `GET /api/error-logs`, `GET /api/health` | Workspace context, logs and health probe |
 
 ### 6.4 Provider and model choice
 
-Google Gemini through AI Studio is used because it supports function calling and JSON output modes, has a free tier suitable for a student project, and matches the course material. The model name is read from the `GEMINI_MODEL` environment variable rather than hardcoded. ⏳ The course slides use `gemini-1.5-pro`; confirm in AI Studio which model is currently available and supported by the SDK you install, then record the final choice and reason here.
+Google Gemini through AI Studio is used because it supports function calling and JSON output modes, has a free tier suitable for a student project, and matches the course material. The model name is read from the `GEMINI_MODEL` environment variable rather than hardcoded. The example configuration uses `gemini-2.5-flash`; update it to any model available in your AI Studio account.
 
 ### 6.5 Tool declaration and server handler
 
 ```jsx
 const tools = [{
   functionDeclarations: [{
-    name: 'run_optimization_job',
-    description: 'Start a grid-search optimization of a built-in strategy on one of the user datasets.',
+    name: 'create_optimization_config',
+    description: 'Convert a trader request into a validated grid-search configuration.',
     parameters: {
       type: 'object',
       properties: {
@@ -778,7 +792,9 @@ const tools = [{
 ```
 
 ```jsx
-// server/services/assistant.js (simplified)
+// server/services/assistantService.js (simplified)
+import { GoogleGenAI } from '@google/genai';
+
 const rangeSchema = z.object({ min: z.number().int().positive(), max: z.number().int().positive(), step: z.number().int().positive() });
 const JobArgsSchema = z.object({
   strategy_type: z.enum(['sma_crossover', 'ema_momentum']),
@@ -789,19 +805,21 @@ const JobArgsSchema = z.object({
   max_drawdown_limit: z.number().gt(0).lte(1).optional()
 }).refine(a => a.fast_ma.max < a.slow_ma.min, { message: 'Fast range must stay below slow range' });
 
-export async function handlePrompt(user, prompt) {
-  const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL, tools, systemInstruction: buildSystemPrompt(user) });
-  const chat = model.startChat();
-  const result = await withRetry(() => chat.sendMessage(prompt));
-  const call = result.response.functionCalls()?.[0];
-  if (!call) return { type: 'clarification', text: result.response.text() };
+export async function parsePrompt({ prompt, datasets, config }) {
+  const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
+  const response = await withRetry(() => ai.models.generateContent({
+    model: config.geminiModel,
+    contents: prompt,
+    config: { systemInstruction: buildSystemPrompt(datasets), tools },
+  }));
+
+  const call = response.functionCalls?.[0];
+  if (!call) return { clarification: response.text, source: 'gemini' };
 
   const args = JobArgsSchema.parse(call.args);          // throws on invalid output
-  await assertDatasetOwnedBy(user.id, args.dataset_id);
+  assertDatasetOwnedBy(args.dataset_id, datasets);
   assertWithinCombinationCap(args, 500);
-  const run = await createRun(user.id, args);           // status: queued
-  enqueueWorker(run.id);                                // summary generated on completion
-  return { type: 'job_started', runId: run.id, parsedArgs: args };
+  return { ...args, estimated_combinations: countCombinations(args), source: 'gemini' };
 }
 
 async function withRetry(fn, tries = 3) {
@@ -818,7 +836,7 @@ async function withRetry(fn, tries = 3) {
 
 ### 6.6 Structured JSON output (summary)
 
-The completion step calls Gemini with `responseMimeType: 'application/json'` and a response schema, so the UI can render each part separately.
+The current PoC generates the summary locally from the run metrics and stores it in the same structured shape, so the UI can render each part separately. The production path can send the run result back to Gemini with `responseMimeType: 'application/json'` and a response schema.
 
 ```json
 {
@@ -829,19 +847,22 @@ The completion step calls Gemini with `responseMimeType: 'application/json'` and
 }
 ```
 
-The values above are an illustrative format example, not real results. The summary prompt instructs the model to use only numbers supplied in the function response and always to state the trial count.
+The values above are an illustrative format example, not real results. The current local summary uses the same shape. A future Gemini summary prompt must use only numbers supplied in the function response and always state the trial count.
 
 ### 6.7 Error handling and resilience
 
 | Failure | Handling |
 | --- | --- |
+| Missing or placeholder `GEMINI_API_KEY` | Server config validation fails fast with a clear message; the standalone mock client remains usable while the live API waits for a valid key |
+| CORS origin mismatch | `CLIENT_URL` is validated as an origin (no trailing slash or path); the startup check reports an invalid value and the README troubleshooting section gives the exact fix |
+| MongoDB unavailable (including WSL without systemd) | Friendly 503 response with no stack trace; troubleshooting documents `service mongod`, manual `mongod`, and Atlas fallbacks |
+| Python version mismatch or missing engine venv | The orchestrator resolves `engine/.venv`, the repository `.venv`, or `python3.11`/`python3`, and reports a clear engine error |
 | Gemini 429, 5xx or timeout | Retry up to 3 times with exponential backoff and jitter, then show: AI assistant is unavailable, please try again |
-| Per-user abuse or cost control | `express-rate-limit` on `/api/assistant` (for example 20 requests per 15 minutes) |
+| Abuse or cost control | `express-rate-limit` on `/api/assistant` (20 requests per 15 minutes) |
 | Invalid or malformed tool arguments | Zod validation fails; the user sees an error; **no job is created and no silent default is used** |
 | Missing information | Assistant asks a clarifying question |
-| Worker timeout or crash | Worker thread terminated; run marked failed with error code; log entry kept |
+| Worker timeout or crash | Python child process terminated; run marked failed with error code; log entry kept |
 | Summary generation fails | Run still shows results and metrics; summary area shows a retry button |
-| Database unavailable | Friendly 503 response with no stack trace |
 
 ### 6.8 Security and safety
 
@@ -849,15 +870,15 @@ The values above are an illustrative format example, not real results. The summa
 - Passwords are hashed with bcrypt; JWTs have a short expiry; every query is scoped by owner.
 - The model only has one tool, which can start a bounded job. It has no delete, update or shell tools, which limits prompt-injection impact.
 - CSV uploads are size-limited and validated; the worker runs only built-in strategies with whitelisted parameters.
-- The summary prompt forbids investment advice. The UI includes a note that results are historical simulations, not predictions.
+- Any Gemini summary prompt must forbid investment advice. The UI includes a note that results are historical simulations, not predictions.
 
 ### 6.9 User-experience polish
 
-Skeleton loaders and a progress indicator during runs, status badges, a completion toast, example prompts under the assistant box, tooltips for metrics such as Sharpe, and clear error messages. Streaming of AI text is a Could Have and is not part of the MVP.
+Loading states, status badges, completion/error toasts, example prompts under the assistant box, clear metric labels, and user-facing error messages. Streaming of AI text is a Could Have and is not part of the MVP.
 
 ### 6.10 Items to complete
 
-⏳ Final model name and reason · ⏳ working screenshots of a full prompt-to-result run · ⏳ end-to-end test with realistic user scenarios · ⏳ report section titled “AI Integration” with provider, snippets, prompts, structured responses, function-calling flow, error and rate-limit handling, and reflection.
+⏳ Working screenshots of a full prompt-to-result run · ⏳ end-to-end test with realistic user scenarios · ⏳ final reflection and demo preparation.
 
 ---
 
@@ -950,8 +971,10 @@ Use the format `<type>(<scope>): <subject>`. The subject should be under 50 char
 
 Here is the diff:
 [PASTE YOUR TERMINAL 'git diff' OUTPUT HERE] |
-| LU6 system prompt | You are the assistant for OptiTrader Lab. Convert the user’s request into an optimization job. If strategy, dataset or objective is missing or ambiguous, ask one short clarifying question. Only call `run_optimization_job` with values from the user’s request and the dataset list provided. Never give investment advice |
+| LU6 system prompt | You are the assistant for OptiTrader Lab. Convert the user’s request into an optimization job. If strategy, dataset or objective is missing or ambiguous, ask one short clarifying question. Only call `create_optimization_config` with values from the user’s request and the dataset list provided. Never give investment advice |
 | LU6 summary | Using only the numbers in the function response, write a JSON summary with headline, key_findings, caveats and trials. Always state the trial count and mention selection bias |
+
+> **Historical prompt log:** the prompts above are preserved as originally used. The implemented medium-fidelity prototype uses `stylesheet.css` and ES6 JavaScript, and the high-fidelity client uses ApexCharts rather than Chart.js.
 
 ## Appendix B: Final Reflection (one page)
 
@@ -978,58 +1001,78 @@ Here is the diff:
 
 ```
 optitrader-lab/
-├── .env.example
 ├── .gitignore
-├── README.md
-├── CONTRIBUTING.md
-├── package.json
+├── readme.md
+├── pytest.ini
 │
 ├── prototypes/                                # Dedicated Prototyping Directory (LU3)
 │   │
 │   ├── 01-lo-fi/                              # Tier 1: Low-Fidelity (Sketches & Paper Layouts)[cite: 1]
-│   │   ├── README.md                          # Screen breakdown & paper-test notes
-│   │   ├── screen1-dashboard.jpg              # Photo of Screen 1 sketch[cite: 1]
-│   │   ├── screen2-nl-assistant.jpg           # Photo of Screen 2 sketch[cite: 1]
-│   │   ├── screen3-dataset-manager.jpg        # Photo of Screen 3 sketch[cite: 1]
-│   │   ├── screen4-results-analytics.jpg      # Photo of Screen 4 sketch[cite: 1]
-│   │   └── screen5-comparison.jpg             # Photo of Screen 5 sketch[cite: 1]
+│   │   ├── readme.md                          # Screen breakdown & early specification
+│   │   ├── 00-login.png
+│   │   ├── 01-dashboard.png
+│   │   ├── 02-nl-assistant.png
+│   │   ├── 03-dataset-manager.png
+│   │   ├── 04-results-analytics.png
+│   │   ├── 04-error-logs.jpeg
+│   │   └── 05-comparison.png
 │   │
 │   ├── 02-mid-fi/                             # Tier 2: Medium-Fidelity (Interactive Web)[cite: 1]
+│   │   ├── readme.md
 │   │   ├── index.html                         # Multi-screen semantic layout[cite: 1]
-│   │   ├── style.css                          # Visual styling, states, button colors[cite: 1]
+│   │   ├── stylesheet.css                     # Visual styling, states, button colors[cite: 1]
 │   │   ├── script.js                          # DOM navigation & mock data toggles
 │   │   └── mockData.json                      # Local test fixtures[cite: 1]
 │   │
 │   └── 03-hi-fi/                              # Tier 3: High-Fidelity Proof of Concept[cite: 1]
+│       ├── readme.md                          # Setup, API, browser walkthrough, troubleshooting
 │       ├── client/                            # React + Vite Interactive Application[cite: 1]
 │       │   ├── src/
-│       │   │   ├── components/                # Reusable UI elements
-│       │   │   ├── pages/                     # Full views (Dashboard, Studio, Compare)
-│       │   │   └── api/                       # Endpoints calling Express backend
+│       │   │   ├── api/                       # client.js, mockApi.js, realApi.js
+│       │   │   ├── components/                # Layout, KPI cards, tables, charts
+│       │   │   ├── context/                   # AppContext.jsx
+│       │   │   ├── data/                      # mockData.json
+│       │   │   ├── pages/                     # Dashboard, Studio, Datasets, Results, Compare
+│       │   │   └── utils/                     # Formatting helpers
+│       │   ├── index.html
+│       │   ├── vite.config.js
 │       │   └── package.json
-│       └── server/                            # Node.js + Express Backend[cite: 1, 3]
-│           ├── workers/
-│           │   └── backtestWorker.js          # Typed-array computation thread
-│           ├── services/
-│           │   └── assistantService.js        # Gemini function calling service[cite: 1, 2]
-│           ├── models/                        # MongoDB persistent schemas[cite: 3]
-│           └── server.js                      # Express API gateway[cite: 3]
+│       ├── server/                            # Node.js + Express Backend[cite: 1, 3]
+│       │   ├── app.js                         # CORS, body parsing, routes, errors
+│       │   ├── server.js                      # Startup: config → MongoDB → listener
+│       │   ├── controllers/                   # Auth, datasets, profiles, runs, assistant
+│       │   ├── middleware/                    # JWT auth, Zod validation, rate limits
+│       │   ├── models/                        # User, Workspace, Dataset, Profile, Run…
+│       │   ├── routes/                        # /api/auth, /api/datasets, /api/runs…
+│       │   ├── schemas/                       # Zod request schemas
+│       │   ├── services/                      # Auth, dataset, run and assistant services
+│       │   ├── utils/                         # Errors, IDs, CSV, combinations, run hashes
+│       │   ├── workers/
+│       │   │   └── backtestWorker.js          # Spawns Python/vectorbt; 120s timeout
+│       │   ├── test/                          # Config + domain tests
+│       │   ├── seed.js                        # Demo user and database seed
+│       │   └── package.json
+│       ├── engine/                            # Python 3.11/vectorbt engine
+│       │   ├── backtest.py
+│       │   └── requirements.txt
+│       └── test/                              # Python, bridge and Node tests
+│           ├── test_backtest.py
+│           ├── bridge.test.js
+│           ├── fixtures/ohlcv.csv
+│           └── readme.md
 │
-└── docs/                                      # Required Documentation Inventory (LU5)[cite: 1]
-    ├── design.md                              # LU1 & LU2 documentation[cite: 1]
-    ├── technical.md                           # Architecture and worker specs[cite: 1]
-    ├── user-guide.md                          # User instructions & prompt gallery[cite: 1]
-    ├── api.md                                 # REST & Gemini schema documentation
-    └── images/                                # Screenshots for README and guide[cite: 1]
+└── docs/                                      # Documentation Inventory (LU5)[cite: 1]
+    ├── submission.md                          # Capstone report (this document)
+    └── design_v01.md                          # Technical design and architecture
 ```
 
 ## Appendix E: Submission Checklist
 
 - [ ]  LU1: persona, 5+ question interview, 3–5 pain points, 5 Whys, HMW
 - [ ]  LU2: 30+ ideas, 5–8 features linked to root causes, MoSCoW with MVP, user story per Must, 6–8 panel hand-drawn storyboard
-- [ ]  LU3: paper sketches, Figma link, working Windsurf prototype, tested with a peer, 3+ documented improvements
+- [ ]  LU3: paper sketches, interactive mid-fidelity prototype, high-fidelity proof of concept, tested with a peer, 3+ documented improvements
 - [ ]  LU4: mock data in JSON plus another format, tests for 3+ features, tests executed and logged, one issue fixed
-- [ ]  LU5: docs folder, README with real screenshots, 3+ commit types, report section
+- [ ]  LU5: docs folder, readme with real screenshots, 3+ commit types, report section
 - [ ]  LU6: working API call, structured JSON, function calling, retries and validation, loading states, key not exposed, report section
 - [ ]  One-page reflection and five-minute demo prepared
 - [ ]  Removed every ⏳ and 📎 marker and any placeholder or example text before submitting

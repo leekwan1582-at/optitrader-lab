@@ -1,9 +1,3 @@
-Here is the enhanced `design.md`. I have preserved your original structure, tone, and formatting, but injected the missing technical, architectural, and security details we discussed. 
-
-You can replace your existing `design.md` with this updated version.
-
-***
-
 # OptiTrader Lab
 
 ## Capstone Project Proposal & Design Documentation
@@ -72,7 +66,7 @@ The system enables traders to focus on strategy research rather than manual expe
 | Core Innovation | AI-guided optimization backed by reproducible experiment tracking |
 | AI Technology | Google Gemini Function Calling |
 | Persistence Layer | Experiment Log and Audit Trail |
-| Stack | React, Node.js/Express, MongoDB, Redis, Gemini API |
+| Stack | React, Node.js/Express (ES6 modules), MongoDB, Gemini API, Python 3.11/vectorbt |
 
 ---
 
@@ -86,6 +80,20 @@ The system enables traders to focus on strategy research rather than manual expe
 | LO4 | Data structures, validation, and database schemas |
 | LO5 | Documentation, architecture, and deployment strategy |
 | LO6 | Gemini function calling, AI integration, and output validation |
+
+---
+
+## 1.3 Implementation status (PoC)
+
+| Area | Status |
+|---|---|
+| React client | Implemented with mock-data mode and live-API mode |
+| Express API | Implemented: JWT auth, dataset/profile/run CRUD, assistant, comparison |
+| MongoDB | Implemented with Mongoose models, owner-scoped queries and seed script |
+| Python engine | Implemented with `vectorbt`; SMA crossover path is active |
+| Gemini assistant | Function calling with local heuristic fallback |
+| Tests | Node config/domain tests, JS ↔ Python bridge tests, pytest engine tests |
+| Post-MVP | Redis queue, S3 storage, WebSocket progress, EMA-specific engine, walk-forward validation |
 
 ---
 
@@ -287,10 +295,6 @@ Clone Best Run
 ```
 
 ---
-
-# 8. Prototype Design
-
-*(Retain existing mockup references and screen descriptions here. Note: Screen 4 should be updated to include an "Error Logs" tab for failed runs, and Screen 1 should include a "Cancel Run" button for active runs).*
 
 # 8. Prototype Design
 
@@ -556,7 +560,7 @@ LU6	Better software engineering practices
 
 ## Screen 5 – Experiment Comparison & Audit Trail Workspace
 
-![Screen 5 - Comparison](../prototypes/01-lo-fi/05---comparison.png.png)
+![Screen 5 - Comparison](../prototypes/01-lo-fi/05-comparison.png)
 ### Comparison Layer
 
 - Equity Curve Overlay
@@ -612,35 +616,29 @@ These enhancements improve usability while preserving the MVP workflows, feature
 │       React Frontend       │ (Vercel/Netlify/Render)
 └────────────────────────────┘
               │
-              ▼ (REST API + WebSockets)
+              ▼ REST API + JWT
 ┌────────────────────────────┐
-│   Node.js / Express API    │ (Render/Railway)
+│   Node.js (ES6) / Express   │ (Render/Railway)
 └────────────────────────────┘
-       │      │         │
-       ▼      ▼         ▼
-  MongoDB   Redis    Gemini API
- (Atlas)   (Queue)  (AI Config)
-              │
-              ▼
-┌────────────────────────────┐
-│     Worker Process         │
-│ (Node.js / Python Spawn)   │
-│  - Strategy Execution      │
-│  - Grid Search Engine      │
-└────────────────────────────┘
-              │
-              ▼
-┌────────────────────────────┐
-│      Experiment Log        │
-│      (MongoDB)             │
-└────────────────────────────┘
+       │          │                 │
+       ▼          ▼                 ▼
+   MongoDB    Gemini API     Worker Process
+   (Atlas)    (AI Config)    (Node child_process)
+                                    │
+                                    ▼
+                          Python 3.11 / vectorbt
+                                    │
+                                    ▼
+                          Experiment Log (MongoDB)
 ```
 
+> Redis queues, S3 storage and WebSocket progress streaming are post-MVP; the PoC uses local uploads and synchronous child-process execution.
+
 ## 9.2 Execution & Progress Tracking
-The MVP will use a Python child-process bridge for backtesting due to its simplicity and performance for local execution. The Node.js worker will spawn Python with the -u flag, stream progress via stdout, and forward updates to the frontend via WebSockets.
+The PoC uses a Python child-process bridge for backtesting because `vectorbt`/pandas provide the required metrics and are fast enough for the MVP. The Node.js orchestrator is written with ES6 modules (`import`/`export`, `"type": "module"`), spawns Python with `PYTHONUNBUFFERED=1`, enforces a 120-second timeout, and parses a JSON result from stdout. The current HTTP request waits for the run to finish; Redis queues, polling progress and WebSocket streaming are post-MVP.
 
 ## 9.3 Reproducibility & Run Hash
-To guarantee reproducibility, the **Run Hash** will be generated using a SHA-256 hash of the following concatenated string:
+To support reproducibility, the **Run Hash** is generated using a SHA-256 hash of the following concatenated string:
 `SHA256(Strategy_ID + JSON.stringify(Sanitized_Config) + Dataset_Checksum + Engine_Version)`
 This ensures that if a user runs the exact same hash, the exact same results will occur.
 
@@ -660,7 +658,7 @@ compare_runs()
 
 ## 10.2 AI Safety & Prompt Injection
 LLMs can hallucinate parameters or be subjected to prompt injection. 
-- **Schema Validation:** The backend will **never** blindly trust the JSON generated by Gemini. The JSON must pass strict validation using **Zod** (a TypeScript-first schema declaration and validation library).
+- **Schema Validation:** The backend does **not** blindly trust the JSON generated by Gemini. The JSON must pass strict validation using **Zod** (a TypeScript-first schema declaration and validation library).
 - **Parameter Clamping:** If the AI suggests a Fast MA of `-5` or a Max Drawdown of `200%`, the backend validation will reject the payload and return a user-friendly error to the UI.
 - **API Fallback:** If the Gemini API times out or fails, the UI will fall back gracefully, allowing the user to configure the run manually.
 
@@ -669,32 +667,39 @@ LLMs can hallucinate parameters or be subjected to prompt injection.
 # 11. Data Schema & Persistence Layer
 
 ## 11.1 File Storage vs. Database
-- **Datasets (CSVs):** Raw CSV files (up to 500MB) will **not** be stored directly in MongoDB. They will be stored in an **AWS S3 Bucket** (or local filesystem for the MVP). 
-- **MongoDB:** Will store the *metadata* (filename, rows, validation status, S3 URL) and the *optimization results*.
+- **Datasets (CSVs):** The PoC writes uploaded CSV files to `server/uploads/` and stores the path in MongoDB. Raw files are **not** stored inside MongoDB documents. An S3 bucket is a post-MVP option for deployment.
+- **MongoDB:** Stores the *metadata* (filename, rows, validation status, file reference) and the *optimization results*.
 
 ## 11.2 Core MongoDB Collections
-1. **Users:** `{ id, email, passwordHash, workspaceName }`
-2. **Datasets:** `{ id, userId, filename, s3Url, symbol, timeframe, rows, status }`
-3. **Profiles:** `{ id, userId, strategyId, parameterRanges, constraints }`
-4. **Experiments (Runs):** `{ id, runHash, userId, datasetId, config, status, metrics, robustnessWarnings, aiSummary }`
-5. **TrialLogs:** `{ experimentId, fastMa, slowMa, sharpe, drawdown, return }` (Allows deep-dive analytics without loading the entire run object).
+1. **Users:** `{ id, name, email, passwordHash, workspaceName }`
+2. **Workspaces:** `{ id, user, name, owner }`
+3. **Datasets:** `{ id, owner, name, symbol, timeframe, date_range, rows, file_ref, status }`
+4. **Profiles:** `{ id, owner, name, strategy_type, objective, max_drawdown_limit, params }`
+5. **Runs:** `{ id, owner, profile_id, dataset_id, run_hash, config, status, trials, best, robustness, equity_curve, ai_summary, error_code }`
+6. **ErrorLogs:** `{ owner, experiment_id, severity, timestamp, component, message }`
+7. **Settings:** `{ key, value }`
+
+Trial-level logging is a post-MVP addition; the PoC stores the best result and equity curve on each run.
 
 ---
 
 # 12. Security & Validation
 
-- **Password Security:** Passwords will be hashed using **bcrypt** (12 salt rounds) before database insertion.
-- **Data Isolation (IDOR Prevention):** All API endpoints fetching datasets, runs, or profiles will include a middleware check to ensure the `userId` from the JWT matches the `userId` of the requested resource.
-- **Rate Limiting:** Implement `express-rate-limit` to prevent brute-force login attempts and to prevent users from spamming the Gemini API or optimization queue.
+- **Password Security:** Passwords are hashed with **bcrypt** (12 salt rounds) before database insertion.
+- **Data Isolation (IDOR Prevention):** All API endpoints fetching datasets, runs, or profiles apply an owner-scoped query using the user ID from the JWT.
+- **Rate Limiting:** `express-rate-limit` protects the Gemini assistant endpoint; login and queue protection can be extended post-MVP.
 
 ---
 
 # 13. Testing & Deployment Strategy
 
 ## 13.1 Testing Strategy
-- **Unit Tests (Jest/Vitest):** Focus heavily on the mathematical correctness of the backtesting engine (e.g., ensuring SMA calculations and Sharpe ratios are exact).
-- **Integration Tests (Supertest):** Test API endpoints, specifically the authentication flow and AI schema validation endpoints.
-- **UAT (User Acceptance Testing):** Manually test the robustness guard logic by intentionally feeding it an overfitted configuration.
+- **Engine unit tests (pytest):** Focus on the mathematical correctness of the backtesting engine (e.g., argument parsing, CSV validation, SMA crossovers, drawdown-cap filtering, and Sharpe/return selection).
+- **Config-validation tests (Node `node:test`):** Validate required environment variables (`MONGO_URI`, `GEMINI_API_KEY`, `CLIENT_URL`, `PORT`) without touching MongoDB or the Gemini network. `npm run config:check` runs the same validation against a real `.env`.
+- **Domain tests (Node `node:test`):** Cover combination counting, CSV parsing, run hashes, assistant fallback parsing and Zod schemas.
+- **Bridge tests (Node `node:test`):** Spawn the real Python engine against a committed OHLCV fixture, then assert successful JSON parsing, missing-file errors, invalid-config errors, and timeout enforcement. No MongoDB or Gemini key is required.
+- **Integration tests (planned, Supertest):** API endpoints with a test MongoDB, specifically authentication, owner scoping, CORS origin handling and AI schema validation.
+- **UAT (User Acceptance Testing):** Manually test the robustness guard logic by intentionally feeding it an overfitted configuration and follow the README troubleshooting section for CORS, MongoDB/WSL, Python-version and API-key failures.
 
 ## 13.2 Deployment Strategy
 - **Frontend:** Vercel (seamless React deployment).
@@ -709,7 +714,7 @@ LLMs can hallucinate parameters or be subjected to prompt injection.
 The capstone is considered successful if users can:
 - ✅ Upload market data and have it strictly validated.
 - ✅ Create optimization profiles.
-- ✅ Launch parameter sweeps and track progress via WebSockets.
+- ✅ Launch parameter sweeps and review the resulting metrics and equity curves.
 - ✅ Track experiment history and reproduce results using the Run Hash.
 - ✅ Compare multiple runs.
 - ✅ Understand robustness risks and view AI-generated analysis.
