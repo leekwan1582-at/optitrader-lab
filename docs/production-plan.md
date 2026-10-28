@@ -1,6 +1,6 @@
 # Production Plan
 
-**Status:** TypeScript migration is implemented in [`../prototypes/03-hi-fi-ts/`](../prototypes/03-hi-fi-ts/) and verified with client/server typechecks, both production builds, 23 Node tests and 9 pytest tests. Production hardening, managed deployment and the Redis/BullMQ queue remain to be completed.
+**Status:** Feature completion work is planned in [`feature-plan.md`](feature-plan.md). The HttpOnly cookie authentication design is implemented in [`auth-plan.md`](auth-plan.md). TypeScript migration is implemented in [`../packages/`](../packages/) and verified with shared/client/server typechecks, production builds, 33 Node tests and 9 pytest tests. Cookie authentication is implemented. Production hardening, managed deployment and the Redis/BullMQ queue remain to be completed.
 
 This plan describes how the high-fidelity PoC becomes a managed production system. The original JS PoC remains in [`../prototypes/03-hi-fi/`](../prototypes/03-hi-fi/) and the academic design remains in [`design_v01.md`](design_v01.md).
 
@@ -11,18 +11,18 @@ This plan describes how the high-fidelity PoC becomes a managed production syste
 | Frontend hosting | Vercel |
 | API hosting | Render or Railway |
 | Database | MongoDB Atlas |
-| Auth | Keep `Authorization: Bearer <JWT>` |
+| Auth | HttpOnly access + refresh cookies (see [`auth-plan.md`](auth-plan.md)) |
 | Run execution | Synchronous Python child process for v1 |
 | Queue | Redis/BullMQ deferred to the v1.1 backlog |
-| TypeScript scope | `prototypes/03-hi-fi-ts/client` and `server` |
+| TypeScript scope | `packages/shared`, `packages/backend`, `packages/frontend` |
 | JavaScript scope | `02-mid-fi` and the original `03-hi-fi` stay JavaScript |
-| Python engine | Copied into `03-hi-fi-ts/engine`; remains Python |
+| Python engine | `packages/backend/engine`; remains Python |
 
 ## 2. Target architecture
 
 ```text
 Vercel — React + Vite + TypeScript
-        │ HTTPS + Authorization: Bearer <JWT>
+        │ HTTPS + HttpOnly cookies (credentials: include)
         ▼
 Render / Railway — Node.js + Express + TypeScript
         │
@@ -46,19 +46,22 @@ Render / Railway — Node.js + Express + TypeScript
 ## 3. Repository strategy
 
 ```text
+packages/
+├── shared/           # Zod schemas, inferred types, WS/JWT/error contracts
+├── backend/
+│   ├── src/          # Express + TS API
+│   ├── engine/       # Python/vectorbt engine
+│   ├── test/         # auth, config, domain and bridge tests
+│   └── readme.md
+└── frontend/         # React + Vite + TS
+    └── readme.md
+
 prototypes/
 ├── 02-mid-fi/        # remains JavaScript
-├── 03-hi-fi/         # frozen JavaScript PoC
-└── 03-hi-fi-ts/      # TypeScript production candidate
-    ├── client/       # React + Vite + TS
-    ├── server/       # Express + TS
-    ├── engine/       # Python/vectorbt
-    ├── test/         # pytest + TS bridge tests
-    ├── pytest.ini
-    └── readme.md
+└── 03-hi-fi/         # frozen JavaScript PoC
 ```
 
-`03-hi-fi-ts` is intentionally self-contained so it can be deployed without cross-folder paths. After production readiness, archive `03-hi-fi` and either keep `03-hi-fi-ts` as the canonical prototype or promote it to `production/`.
+The package layout is the canonical production candidate. `prototypes/03-hi-fi` remains the historical JS PoC.
 
 ## 4. TypeScript migration
 
@@ -77,37 +80,34 @@ prototypes/
 ### Commands
 
 ```bash
-# Server
-cd prototypes/03-hi-fi-ts/server
+# All packages
 npm install
 npm run typecheck
 npm run build
 npm test
 
-# Client
-cd ../client
-npm install
-npm run typecheck
-npm run build
-
-# Python (from the repository root)
-cd prototypes/03-hi-fi-ts
-../../.venv/bin/python -m pytest -q
+# Python engine
+npm run test:engine
 ```
 
 ### Rules going forward
 
-- No new `.js`/`.jsx` files in `03-hi-fi-ts/client/src` or `03-hi-fi-ts/server`.
+- No new `.js`/`.jsx` files in `packages/frontend/src` or `packages/backend/src`.
 - `strict` stays enabled; avoid introducing `any` without a comment.
-- Shared request/response shapes should be added to `types/domain.ts` or generated from OpenAPI.
+- Shared request/response shapes live in `packages/shared`; never duplicate them in an app package.
 - Keep the Python JSON contract typed in `BacktestResult`.
 
 ## 5. Production backend hardening
 
 ### Authentication and authorization
 
-- Keep Bearer JWT but shorten access-token lifetime.
-- Add refresh/re-auth strategy and token revocation.
+Design: see [`auth-plan.md`](auth-plan.md).
+
+- Use HttpOnly access (15m) and refresh (7d) cookies.
+- Never expose a JWT to browser JavaScript or browser storage.
+- Rotate refresh tokens and store only their hashes in MongoDB.
+- Revoke sessions on logout and password change.
+- Detect refresh-token reuse and revoke the session family.
 - Add password reset and email verification.
 - Keep owner-scoped queries on every dataset, profile and run endpoint.
 - Add auth rate limiting and login audit events.
@@ -155,7 +155,7 @@ cd prototypes/03-hi-fi-ts
 
 ### Frontend — Vercel
 
-- Build command: `npm run build` in `prototypes/03-hi-fi-ts/client`.
+- Build command: `npm run build -w @optitrader/frontend`.
 - Output: `dist/`.
 - Environment: `VITE_API_URL=https://<api-domain>/api`.
 - Set `VITE_USE_MOCK_API=false` in production.
@@ -167,7 +167,7 @@ Use a Docker image containing Node.js 20 and Python 3.11 + `engine/requirements.
 
 - Start command: `npm start` after `npm run build`.
 - Health check: `GET /api/health`.
-- Environment: `MONGO_URI`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `CLIENT_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `PORT`.
+- Environment: `MONGO_URI`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `CLIENT_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_TTL`, `COOKIE_DOMAIN`, `PORT`.
 - Secrets live in the platform dashboard, never in git.
 - Configure graceful shutdown for SIGINT/SIGTERM.
 - Verify the platform HTTP timeout is longer than the engine timeout.
@@ -224,7 +224,8 @@ Keep synchronous execution for v1. Move to the queue in v1.1:
 | Risk | Mitigation |
 |---|---|
 | Long synchronous runs exceed platform HTTP timeout | Keep grids small, enforce engine timeout below platform limit, queue in v1.1 |
-| Bearer tokens exposed through XSS | Short expiry, strict CSP, avoid sensitive data in localStorage |
+| Cookie/CORS misconfiguration | Exact `CLIENT_URL`, `credentials: true`, same-site domains or reverse proxy, integration tests |
+| Refresh-token theft or replay | Rotation, hashed storage, reuse detection and revocation |
 | Local uploads lost on redeploy | Move to object storage before launch |
 | Duplicated JS PoC and TS candidate drift | Freeze JS PoC and archive it after TS validation |
 | Python/vectorbt increases image size and build time | Build a dedicated Docker image and cache dependencies |
@@ -236,5 +237,9 @@ Keep synchronous execution for v1. Move to the queue in v1.1:
 - Root [`readme.md`](../readme.md) — project entry point and production link.
 - [`design_v01.md`](design_v01.md) — PoC technical design.
 - [`submission.md`](submission.md) — capstone report.
-- [`../prototypes/03-hi-fi-ts/readme.md`](../prototypes/03-hi-fi-ts/readme.md) — TypeScript setup and browser testing.
-- [`../prototypes/03-hi-fi-ts/test/readme.md`](../prototypes/03-hi-fi-ts/test/readme.md) — test environment and procedures.
+- [`auth-plan.md`](auth-plan.md) — HttpOnly cookie authentication design and migration plan.
+- [`auth-implementation-checklist.md`](auth-implementation-checklist.md) — step-by-step implementation and verification checklist.
+- [`feature-plan.md`](feature-plan.md) — remaining F1–F8 features, live-mode switch, engine/AI work and test plan.
+- [`../packages/shared/readme.md`](../packages/shared/readme.md) — shared contracts.
+- [`../packages/backend/readme.md`](../packages/backend/readme.md) — backend setup, auth, engine and tests.
+- [`../packages/frontend/readme.md`](../packages/frontend/readme.md) — frontend setup, auth flow and testing.

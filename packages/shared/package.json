@@ -1,24 +1,25 @@
 {
-  "name": "optitrader-lab",
+  "name": "@optitrader/shared",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=24"
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
-  "workspaces": [
-    "packages/shared",
-    "packages/backend",
-    "packages/frontend"
-  ],
+  "files": ["dist"],
   "scripts": {
-    "dev": "concurrently -n backend,frontend \"npm:dev:backend\" \"npm:dev:frontend\"",
-    "dev:backend": "npm run dev -w packages/backend",
-    "dev:frontend": "npm run dev -w packages/frontend",
-    "build": "npm run build --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "eslint .",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "test": "npm run test --workspaces --if-present"
+    "build": "tsc -b",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
   }
 }

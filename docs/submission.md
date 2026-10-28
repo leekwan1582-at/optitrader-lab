@@ -659,12 +659,16 @@ The Actual and Status columns are filled after you execute each test. ⏳
 | [`docs/submission.md`](submission.md) | Instructors | Capstone report: LU1–LU6, mock data, tests, AI integration | ✅ |
 | [`docs/design_v01.md`](design_v01.md) | Instructors / developers | Technical design: features, architecture, schemas, security, deployment | ✅ |
 | [`docs/production-plan.md`](production-plan.md) | Developers | Production roadmap, managed deployment and TypeScript migration | ✅ |
+| [`docs/auth-plan.md`](auth-plan.md) | Developers | HttpOnly cookie authentication design and migration plan | ✅ |
+| [`docs/auth-implementation-checklist.md`](auth-implementation-checklist.md) | Developers | Authentication implementation and verification checklist | ✅ |
+| [`docs/feature-plan.md`](feature-plan.md) | Developers | Remaining F1–F8 features, live mode, engine/AI and test plan | ✅ |
 | [`prototypes/01-lo-fi/readme.md`](../prototypes/01-lo-fi/readme.md) | Instructors | Low-fidelity wireframes and early specification | ✅ |
 | [`prototypes/02-mid-fi/readme.md`](../prototypes/02-mid-fi/readme.md) | Reviewers | Medium-fidelity interactive prototype and mock data | ✅ |
 | [`prototypes/03-hi-fi/readme.md`](../prototypes/03-hi-fi/readme.md) | Developers | High-fidelity setup, API, browser walkthrough and troubleshooting | ✅ |
 | [`prototypes/03-hi-fi/test/readme.md`](../prototypes/03-hi-fi/test/readme.md) | Developers | Original JS test-environment setup and procedure | ✅ |
-| [`prototypes/03-hi-fi-ts/readme.md`](../prototypes/03-hi-fi-ts/readme.md) | Developers | TypeScript production candidate setup and browser walkthrough | ✅ |
-| [`prototypes/03-hi-fi-ts/test/readme.md`](../prototypes/03-hi-fi-ts/test/readme.md) | Developers | TypeScript test-environment setup and procedure | ✅ |
+| [`packages/shared/readme.md`](../packages/shared/readme.md) | Developers | Shared schemas, types, WS/JWT/error contracts | ✅ |
+| [`packages/backend/readme.md`](../packages/backend/readme.md) | Developers | Backend setup, cookie auth, engine and tests | ✅ |
+| [`packages/frontend/readme.md`](../packages/frontend/readme.md) | Developers | Frontend setup, auth flow and browser testing | ✅ |
 
 A standalone user guide, technical guide, API reference and `CONTRIBUTING.md` were deferred; their essential content is folded into the high-fidelity README and the documents above.
 
@@ -677,22 +681,28 @@ optitrader-lab/
 ├─ docs/
 │  ├─ submission.md              # Capstone report
 │  ├─ design_v01.md              # Technical/design specification
-│  └─ production-plan.md         # Production roadmap and TypeScript plan
+│  ├─ production-plan.md         # Production roadmap and TypeScript plan
+│  ├─ auth-plan.md               # HttpOnly cookie authentication plan
+│  ├─ auth-implementation-checklist.md # Auth implementation checklist
+│  └─ feature-plan.md            # Remaining feature completion plan
+├─ packages/
+│  ├─ shared/                    # Zod schemas, types, WS/JWT/error contracts
+│  ├─ backend/
+│  │  ├─ src/                    # Express + TypeScript API
+│  │  ├─ engine/                 # Python/vectorbt engine + pytest
+│  │  ├─ test/                   # Auth/config/domain/bridge tests
+│  │  └─ readme.md
+│  └─ frontend/                  # React + Vite + TypeScript client
+│     ├─ src/
+│     └─ readme.md
 ├─ prototypes/
 │  ├─ 01-lo-fi/                  # Wireframes + low-fi readme
 │  ├─ 02-mid-fi/                 # Interactive HTML/CSS/ES6 prototype
-│  ├─ 03-hi-fi/                  # Original JS PoC
-│  │  └─ ...
-│  └─ 03-hi-fi-ts/               # TypeScript production candidate
-│     ├─ client/                 # React + Vite + TypeScript app
-│     ├─ server/                 # Express API, models, services, worker
-│     ├─ engine/                 # Python/vectorbt engine
-│     ├─ test/                   # Python, bridge and Node tests
-│     └─ readme.md
+│  └─ 03-hi-fi/                  # Original JS PoC
 └─ .gitignore
 ```
 
-Environment templates live in `prototypes/03-hi-fi/client/.env.example` and `prototypes/03-hi-fi/server/.env.example`. Uploaded/synthetic CSVs are written to `prototypes/03-hi-fi/server/uploads/` (git-ignored).
+Environment templates live in `packages/frontend/.env.example` and `packages/backend/.env.example`. Uploaded/synthetic CSVs are written to `packages/backend/uploads/` (git-ignored).
 
 ### 5.3 Documentation prompts (log in Appendix A)
 
@@ -873,7 +883,7 @@ The values above are an illustrative format example, not real results. The curre
 ### 6.8 Security and safety
 
 - The Gemini API key lives only in server environment variables; `.env` is git-ignored and `.env.example` documents the names. The browser never receives the key.
-- Passwords are hashed with bcrypt; JWTs have a short expiry; every query is scoped by owner.
+- Passwords are hashed with bcrypt; every query is scoped by owner. JWTs now live in HttpOnly `SameSite=Strict` cookies with refresh rotation — see [auth-plan.md](auth-plan.md).
 - The model only has one tool, which can start a bounded job. It has no delete, update or shell tools, which limits prompt-injection impact.
 - CSV uploads are size-limited and validated; the worker runs only built-in strategies with whitelisted parameters.
 - Any Gemini summary prompt must forbid investment advice. The UI includes a note that results are historical simulations, not predictions.
@@ -1005,72 +1015,62 @@ Here is the diff:
 
 ## Appendix D: Propose Directory Structure
 
-```
+## Appendix D: Current Directory Structure
+
+```text
 optitrader-lab/
 ├── .gitignore
 ├── readme.md
 ├── pytest.ini
-│
-├── prototypes/                                # Dedicated Prototyping Directory (LU3)
-│   │
-│   ├── 01-lo-fi/                              # Tier 1: Low-Fidelity (Sketches & Paper Layouts)[cite: 1]
-│   │   ├── readme.md                          # Screen breakdown & early specification
-│   │   ├── 00-login.png
-│   │   ├── 01-dashboard.png
-│   │   ├── 02-nl-assistant.png
-│   │   ├── 03-dataset-manager.png
-│   │   ├── 04-results-analytics.png
-│   │   ├── 04-error-logs.jpeg
-│   │   └── 05-comparison.png
-│   │
-│   ├── 02-mid-fi/                             # Tier 2: Medium-Fidelity (Interactive Web)[cite: 1]
-│   │   ├── readme.md
-│   │   ├── index.html                         # Multi-screen semantic layout[cite: 1]
-│   │   ├── stylesheet.css                     # Visual styling, states, button colors[cite: 1]
-│   │   ├── script.js                          # DOM navigation & mock data toggles
-│   │   └── mockData.json                      # Local test fixtures[cite: 1]
-│   │
-│   └── 03-hi-fi/                              # Tier 3: High-Fidelity Proof of Concept[cite: 1]
-│       ├── readme.md                          # Setup, API, browser walkthrough, troubleshooting
-│       ├── client/                            # React + Vite Interactive Application[cite: 1]
-│       │   ├── src/
-│       │   │   ├── api/                       # client.js, mockApi.js, realApi.js
-│       │   │   ├── components/                # Layout, KPI cards, tables, charts
-│       │   │   ├── context/                   # AppContext.jsx
-│       │   │   ├── data/                      # mockData.json
-│       │   │   ├── pages/                     # Dashboard, Studio, Datasets, Results, Compare
-│       │   │   └── utils/                     # Formatting helpers
-│       │   ├── index.html
-│       │   ├── vite.config.js
-│       │   └── package.json
-│       ├── server/                            # Node.js + Express Backend[cite: 1, 3]
-│       │   ├── app.js                         # CORS, body parsing, routes, errors
-│       │   ├── server.js                      # Startup: config → MongoDB → listener
-│       │   ├── controllers/                   # Auth, datasets, profiles, runs, assistant
-│       │   ├── middleware/                    # JWT auth, Zod validation, rate limits
-│       │   ├── models/                        # User, Workspace, Dataset, Profile, Run…
-│       │   ├── routes/                        # /api/auth, /api/datasets, /api/runs…
-│       │   ├── schemas/                       # Zod request schemas
-│       │   ├── services/                      # Auth, dataset, run and assistant services
-│       │   ├── utils/                         # Errors, IDs, CSV, combinations, run hashes
-│       │   ├── workers/
-│       │   │   └── backtestWorker.js          # Spawns Python/vectorbt; 120s timeout
-│       │   ├── test/                          # Config + domain tests
-│       │   ├── seed.js                        # Demo user and database seed
-│       │   └── package.json
-│       ├── engine/                            # Python 3.11/vectorbt engine
-│       │   ├── backtest.py
-│       │   └── requirements.txt
-│       └── test/                              # Python, bridge and Node tests
-│           ├── test_backtest.py
-│           ├── bridge.test.js
-│           ├── fixtures/ohlcv.csv
-│           └── readme.md
-│
-└── docs/                                      # Documentation Inventory (LU5)[cite: 1]
-    ├── submission.md                          # Capstone report (this document)
-    ├── design_v01.md                          # Technical design and architecture
-    └── production-plan.md                     # Production roadmap and TypeScript plan
+├── package.json
+├── eslint.config.js
+├── tsconfig.base.json
+├── docs/
+│   ├── submission.md
+│   ├── design_v01.md
+│   ├── production-plan.md
+│   ├── auth-plan.md
+│   └── auth-implementation-checklist.md
+├── packages/
+│   ├── shared/
+│   │   ├── src/
+│   │   │   ├── schemas/{auth,domain,assistant}.ts
+│   │   │   ├── errors.ts
+│   │   │   ├── ws.ts
+│   │   │   └── index.ts
+│   │   ├── package.json
+│   │   └── tsconfig.json
+│   ├── backend/
+│   │   ├── src/
+│   │   │   ├── app.ts, server.ts, config.ts, database.ts, seed.ts
+│   │   │   ├── controllers/ middleware/ models/ routes/
+│   │   │   ├── services/ types/ utils/ workers/ scripts/
+│   │   ├── engine/
+│   │   │   ├── backtest.py
+│   │   │   ├── requirements.txt
+│   │   │   └── tests/test_backtest.py
+│   │   ├── test/
+│   │   │   ├── auth.test.ts
+│   │   │   ├── config.test.ts
+│   │   │   ├── domain.test.ts
+│   │   │   ├── bridge.test.ts
+│   │   │   └── fixtures/ohlcv.csv
+│   │   ├── package.json
+│   │   └── tsconfig.json / tsconfig.build.json
+│   └── frontend/
+│       ├── src/
+│       │   ├── api/ components/ context/ data/ pages/ types/ utils/
+│       │   ├── App.tsx
+│       │   ├── main.tsx
+│       │   └── styles.css
+│       ├── index.html
+│       ├── vite.config.ts
+│       ├── package.json
+│       └── tsconfig.json / tsconfig.node.json
+└── prototypes/
+    ├── 01-lo-fi/                  # Paper wireframes and early spec
+    ├── 02-mid-fi/                 # Interactive HTML/CSS/ES6 prototype
+    └── 03-hi-fi/                  # Original JavaScript proof of concept
 ```
 
 ## Appendix E: Submission Checklist

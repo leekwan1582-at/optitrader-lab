@@ -1,0 +1,49 @@
+{
+  "name": "@optitrader/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "seed": "tsx src/seed.ts",
+    "seed:prod": "node dist/seed.js",
+    "db:check": "tsx src/scripts/check-db.ts",
+    "test": "node --import tsx --test 'test/*.test.ts'",
+    "test:config": "node --import tsx --test test/config.test.ts",
+    "test:bridge": "node --import tsx --test test/bridge.test.ts",
+    "typecheck": "tsc --noEmit",
+    "config:check": "tsx -e \"import 'dotenv/config'; import { loadConfig } from './src/config.ts'; loadConfig(); console.log('✅ Configuration valid')\""
+  },
+  "dependencies": {
+    "@google/genai": "^2.31.0",
+    "@optitrader/shared": "*",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.11.4",
+    "pino": "^10.4.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.9",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.10.2",
+    "@types/supertest": "^7.2.1",
+    "mongodb-memory-server": "^11.3.0",
+    "supertest": "^7.3.1",
+    "tsx": "^4.19.2",
+    "typescript": "^6.0.3"
+  },
+  "allowScripts": {
+    "@google/genai@2.31.0": true,
+    "protobufjs@7.6.6": true
+  }
+}

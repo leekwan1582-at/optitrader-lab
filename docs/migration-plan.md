@@ -4,7 +4,7 @@
 
 ## Final architecture
 
-- The original JS PoC remains in `03-hi-fi`; the TypeScript production candidate is `03-hi-fi-ts`.
+- The original JS PoC remains in `prototypes/03-hi-fi`; the TypeScript candidate now lives in `packages/shared`, `packages/backend`, and `packages/frontend`.
 - `02-mid-fi` intentionally remains JavaScript.
 
 - React + Vite client with mock-data and live-API modes.
@@ -20,7 +20,7 @@
 - Built the React client under `prototypes/03-hi-fi/client/`: pages, components, API adapters, context, mock data and styling.
 - Built the Express server under `prototypes/03-hi-fi/server/`: routes, controllers, middleware, services, models, seed script and worker.
 - Converted all server JavaScript in the original PoC to ES6 modules (`import`/`export`); no CommonJS remains.
-- Created the self-contained TypeScript candidate in `prototypes/03-hi-fi-ts/` (client, server, engine, tests).
+- Created the self-contained TypeScript candidate, then ported it into `packages/shared`, `packages/backend`, and `packages/frontend`.
 - Added JWT auth, owner-scoped queries, Zod validation, rate limiting and error handling.
 - Added config validation and a demo seed user (`marcus@optitrader.dev` / `demo1234`).
 - Fixed Python engine issues found by the bridge test: index-frequency inference, MultiIndex parameter selection, non-finite JSON values and duplicate function definitions.
@@ -36,6 +36,10 @@
 - Kept `prototypes/03-hi-fi/readme.md` as setup/API/browser-testing/troubleshooting reference.
 - Added `prototypes/03-hi-fi/test/readme.md` for test-environment setup and procedure.
 - Cleaned up and renamed wireframe image assets to stable filenames.
+
+## Next feature phase
+
+The remaining F1–F8 work, live-mode default, engine holdout/EMA and Gemini summary work are planned in [`feature-plan.md`](feature-plan.md).
 
 ## Deferred / post-MVP
 

@@ -1,4 +1,15 @@
 {
+  "name": "optitrader-lab",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "packages/shared",
+    "packages/backend",
+    "packages/frontend"
+  ],
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "^4.8.1",
     "@eslint/js": "^9.39.5",
@@ -13,18 +24,17 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.1"
   },
-  "private": true,
-  "type": "module",
-  "engines": {
-    "node": ">=24"
-  },
   "scripts": {
+    "dev": "concurrently -n backend,frontend \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": "npm run dev -w @optitrader/backend",
+    "dev:frontend": "npm run dev -w @optitrader/frontend",
+    "build": "npm run build -w @optitrader/shared && npm run build -w @optitrader/backend && npm run build -w @optitrader/frontend",
+    "typecheck": "npm run typecheck -w @optitrader/shared && npm run typecheck -w @optitrader/backend && npm run typecheck -w @optitrader/frontend",
+    "test": "npm run test -w @optitrader/backend",
+    "test:engine": "./.venv/bin/python -m pytest packages/backend/engine/tests -q",
     "lint": "eslint",
     "lint:all": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present"
+    "format:check": "prettier --check ."
   }
 }

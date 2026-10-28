@@ -35,17 +35,18 @@ optitrader-lab/
 ├── docs/
 │   ├── submission.md             # Capstone report (LU1–LU6)
 │   ├── design_v01.md             # Technical/design specification
-│   └── production-plan.md        # Production roadmap and TypeScript plan
+│   ├── production-plan.md        # Production roadmap and TypeScript plan
+│   ├── auth-plan.md              # HttpOnly cookie authentication design
+│   └── auth-implementation-checklist.md
+├── packages/
+│   ├── shared/                   # Zod schemas, inferred types, WS/JWT/error contracts
+│   ├── backend/                  # Express + TypeScript API
+│   │   └── engine/               # Python/vectorbt backtest engine
+│   └── frontend/                 # React + Vite + TypeScript client
 ├── prototypes/
 │   ├── 01-lo-fi/                 # Paper wireframes + low-fi proposal
 │   ├── 02-mid-fi/                # Interactive HTML/CSS/ES6 prototype (JS)
-│   ├── 03-hi-fi/                 # Original high-fidelity PoC (JS)
-│   └── 03-hi-fi-ts/              # TypeScript production candidate
-│       ├── client/               # React + Vite + TypeScript
-│       ├── server/               # Express + TypeScript
-│       ├── engine/               # Python/vectorbt backtest engine
-│       ├── test/                 # Python, bridge and Node tests
-│       └── readme.md             # TypeScript setup + browser walkthrough
+│   └── 03-hi-fi/                 # Original high-fidelity JS PoC
 └── pytest.ini
 ```
 
@@ -53,20 +54,19 @@ optitrader-lab/
 
 | Requirement | Needed for |
 |---|---|
-| Node.js 18+ | Client and server |
+| Node.js 24 | Client and server |
 | Python 3.11 + `vectorbt` | Backtest engine and bridge tests |
 | MongoDB (local or Atlas) | Live API mode |
 | Google Gemini API key | Live API startup and assistant (local fallback if API calls fail) |
 
 ## Quick start — standalone demo
 
-No backend is required. The client uses bundled mock data and `localStorage`.
+No backend is required. The client uses bundled mock data in memory. Authentication uses HttpOnly cookies when the live API is enabled; mock mode keeps its user in memory only.
 
 ```bash
-cd prototypes/03-hi-fi-ts/client
 npm install
-cp .env.example .env
-npm run dev
+cp packages/frontend/.env.example packages/frontend/.env
+npm run dev -w @optitrader/frontend
 ```
 
 Open `http://localhost:5173`. The demo login is pre-filled:
@@ -77,22 +77,23 @@ marcus@optitrader.dev / demo1234
 
 ## Quick start — live API
 
-Prerequisites: Node.js 18+, Python 3.11, MongoDB (local or Atlas), and a Gemini API key.
+Prerequisites: Node.js 24, Python 3.11, MongoDB (local or Atlas), and a Gemini API key.
 
 ```bash
-# 1. Backend
-cd prototypes/03-hi-fi-ts/server
 npm install
+
+# 1. Backend
+cd packages/backend
 cp .env.example .env
-# edit .env: MONGO_URI, GEMINI_API_KEY, CLIENT_URL
+# edit .env: MONGO_URI, GEMINI_API_KEY, CLIENT_URL, JWT secrets
 npm run config:check
 npm run seed
 npm run dev
 
 # 2. Frontend (new terminal)
-cd prototypes/03-hi-fi-ts/client
+cd packages/frontend
 cp .env.example .env
-# set VITE_USE_MOCK_API=false
+# set VITE_USE_MOCK_API=false (dev proxy already targets localhost:5000)
 npm run dev
 ```
 
@@ -101,16 +102,14 @@ API: `http://localhost:5000` · health check: `GET /api/health`.
 ## Tests
 
 ```bash
-# Node: config, domain and TypeScript ↔ Python bridge tests
-cd prototypes/03-hi-fi-ts/server
+# Node: auth, config, domain and TypeScript ↔ Python bridge tests
 npm test
 
-# Python engine (uses the copied engine + local pytest.ini)
-cd ..
-../../.venv/bin/python -m pytest -q
+# Python engine
+npm run test:engine
 ```
 
-See [`prototypes/03-hi-fi-ts/test/readme.md`](prototypes/03-hi-fi-ts/test/readme.md) for test-environment setup and troubleshooting. The original JS PoC remains in `03-hi-fi/` with the same commands.
+See [`packages/backend/readme.md`](packages/backend/readme.md) for test-environment setup and troubleshooting. The original JS PoC remains in `prototypes/03-hi-fi/`.
 
 ## Documentation map
 
@@ -119,22 +118,27 @@ See [`prototypes/03-hi-fi-ts/test/readme.md`](prototypes/03-hi-fi-ts/test/readme
 | [`docs/submission.md`](docs/submission.md) | Capstone report: research, design, prototyping, mock data, testing, AI integration |
 | [`docs/design_v01.md`](docs/design_v01.md) | Technical design: features, architecture, schemas, security, deployment |
 | [`docs/production-plan.md`](docs/production-plan.md) | Production roadmap, managed deployment, TypeScript migration and Redis backlog |
+| [`docs/auth-plan.md`](docs/auth-plan.md) | HttpOnly cookie authentication design and migration plan |
+| [`docs/auth-implementation-checklist.md`](docs/auth-implementation-checklist.md) | Authentication implementation and verification checklist |
+| [`docs/feature-plan.md`](docs/feature-plan.md) | Remaining F1–F8 features, live-mode switch, engine/AI work and tests |
 | [`prototypes/01-lo-fi/readme.md`](prototypes/01-lo-fi/readme.md) | Low-fidelity wireframes and early specification |
 | [`prototypes/02-mid-fi/readme.md`](prototypes/02-mid-fi/readme.md) | Medium-fidelity interactive prototype |
 | [`prototypes/03-hi-fi/readme.md`](prototypes/03-hi-fi/readme.md) | Original high-fidelity PoC setup, API and troubleshooting (JS) |
-| [`prototypes/03-hi-fi-ts/readme.md`](prototypes/03-hi-fi-ts/readme.md) | TypeScript candidate setup and browser walkthrough |
-| [`prototypes/03-hi-fi-ts/test/readme.md`](prototypes/03-hi-fi-ts/test/readme.md) | TypeScript test environment and procedures |
+| [`packages/shared/readme.md`](packages/shared/readme.md) | Shared contracts and build instructions |
+| [`packages/backend/readme.md`](packages/backend/readme.md) | Backend setup, auth, engine and tests |
+| [`packages/frontend/readme.md`](packages/frontend/readme.md) | Frontend setup, auth flow and browser testing |
 
 ## Production roadmap
 
-See [`docs/production-plan.md`](docs/production-plan.md) for the managed Vercel + Render/Railway + Atlas target, Bearer JWT hardening, synchronous v1 execution and the Redis/BullMQ backlog.
+See [`docs/production-plan.md`](docs/production-plan.md) for the managed Vercel + Render/Railway + Atlas target, synchronous v1 execution and the Redis/BullMQ backlog. Authentication uses HttpOnly cookies — see [`docs/auth-plan.md`](docs/auth-plan.md). Remaining product features are planned in [`docs/feature-plan.md`](docs/feature-plan.md).
 
 ## Known limitations (PoC)
 
 - The Python engine currently implements the SMA crossover path; the UI also exposes EMA momentum, but it is not a separate engine algorithm yet.
 - Seeded datasets without an uploaded CSV use a deterministic synthetic OHLCV file for local runs.
 - Runs execute synchronously through the child process. Redis/BullMQ queues, WebSocket progress and deployment hardening are tracked in the [production plan](docs/production-plan.md).
-- Gemini is optional at the service level; the assistant falls back to a local heuristic parser if the API is unavailable.
+- The assistant falls back to a local heuristic parser if Gemini API calls fail.
+- Mock mode keeps data and session state in memory, so a page reload returns to login.
 - Historical data ingestion supports standard OHLCV CSV files only.
 
 ## License

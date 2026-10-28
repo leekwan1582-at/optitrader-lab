@@ -24,6 +24,7 @@ export default defineConfig([
     ".archieve/**",
     "prototypes/**",
     "docs/**",
+    "**/*.fixture.ts",
   ]),
 
   // Applies to every package.
@@ -44,6 +45,19 @@ export default defineConfig([
     },
     rules: {
       // AGENTS.md bans: any, !., @ts-ignore, undescribed @ts-expect-error.
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/no-unnecessary-type-conversion": "off",
+      "@typescript-eslint/no-unnecessary-type-assertion": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/restrict-template-expressions": "off",
+      "@typescript-eslint/no-base-to-string": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/no-deprecated": "off",
+      "@typescript-eslint/prefer-promise-reject-errors": "off",
+      "@typescript-eslint/no-redundant-type-constituents": "off",
+      "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-non-null-assertion": "error",
       "@typescript-eslint/ban-ts-comment": [

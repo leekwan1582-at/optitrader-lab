@@ -87,12 +87,12 @@ The system enables traders to focus on strategy research rather than manual expe
 
 | Area | Status |
 |---|---|
-| React client | Implemented in JavaScript (`03-hi-fi`) and TypeScript (`03-hi-fi-ts`), with mock-data and live-API modes |
-| Express API | Implemented in JavaScript and TypeScript: JWT auth, dataset/profile/run CRUD, assistant, comparison |
-| MongoDB | Implemented with Mongoose models, owner-scoped queries and seed script |
+| React client | Implemented in JavaScript (`03-hi-fi`) and TypeScript (`packages/frontend`), with mock-data and live-API modes |
+| Express API | Implemented in JavaScript and TypeScript: HttpOnly cookie auth, dataset/profile/run CRUD, assistant, comparison |
+| MongoDB | Implemented with Mongoose models, owner-scoped queries, refresh sessions and seed script |
 | Python engine | Implemented with `vectorbt`; SMA crossover path is active |
 | Gemini assistant | Function calling with local heuristic fallback |
-| Tests | Node config/domain tests, JS/TS ↔ Python bridge tests, pytest engine tests |
+| Tests | Auth/config/domain Node tests, JS/TS ↔ Python bridge tests, pytest engine tests |
 | Post-MVP | Redis queue, S3 storage, WebSocket progress, EMA-specific engine, walk-forward validation |
 
 ---
@@ -688,6 +688,7 @@ Trial-level logging is a post-MVP addition; the PoC stores the best result and e
 - **Password Security:** Passwords are hashed with **bcrypt** (12 salt rounds) before database insertion.
 - **Data Isolation (IDOR Prevention):** All API endpoints fetching datasets, runs, or profiles apply an owner-scoped query using the user ID from the JWT.
 - **Rate Limiting:** `express-rate-limit` protects the Gemini assistant endpoint; login and queue protection can be extended post-MVP.
+- **Production session storage:** implemented with HttpOnly `SameSite=Strict` access/refresh cookies, refresh rotation and Origin checks. See [auth-plan.md](auth-plan.md).
 
 ---
 
@@ -697,6 +698,7 @@ Trial-level logging is a post-MVP addition; the PoC stores the best result and e
 - **Engine unit tests (pytest):** Focus on the mathematical correctness of the backtesting engine (e.g., argument parsing, CSV validation, SMA crossovers, drawdown-cap filtering, and Sharpe/return selection).
 - **Config-validation tests (Node `node:test`):** Validate required environment variables (`MONGO_URI`, `GEMINI_API_KEY`, `CLIENT_URL`, `PORT`) without touching MongoDB or the Gemini network. `npm run config:check` runs the same validation against a real `.env`.
 - **Domain tests (Node `node:test`):** Cover combination counting, CSV parsing, run hashes, assistant fallback parsing and Zod schemas.
+- **Auth integration tests (Supertest + memory MongoDB):** Cover cookie flags, login/refresh/logout, refresh rotation and reuse detection, Origin checks and production `Secure` cookies.
 - **Bridge tests (Node `node:test`):** Spawn the real Python engine against a committed OHLCV fixture, then assert successful JSON parsing, missing-file errors, invalid-config errors, and timeout enforcement. No MongoDB or Gemini key is required.
 - **Integration tests (planned, Supertest):** API endpoints with a test MongoDB, specifically authentication, owner scoping, CORS origin handling and AI schema validation.
 - **UAT (User Acceptance Testing):** Manually test the robustness guard logic by intentionally feeding it an overfitted configuration and follow the README troubleshooting section for CORS, MongoDB/WSL, Python-version and API-key failures.
