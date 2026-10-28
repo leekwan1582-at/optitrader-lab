@@ -156,33 +156,54 @@ OptiTrader Lab uses MongoDB to store user data, datasets, and experiment logs. Y
 
 If you are developing in WSL (Ubuntu), install the MongoDB Community Edition locally.
 
-1. **Install MongoDB** (if not already installed):
+1. **Add the MongoDB 8.0 apt repository** (Ubuntu 22.04/24.04):
 
    ```bash
-   sudo apt update
-   sudo apt install -y mongodb-org
+   sudo apt-get update
+   sudo apt-get install -y gnupg curl
+   curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | \
+     sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-8.0.gpg
+   . /etc/os-release
+   echo "deb [ arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu ${VERSION_CODENAME}/mongodb-org/8.0 multiverse" | \
+     sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list
+   sudo apt-get update
    ```
 
-2. **Start the MongoDB service:**
+   > `mongodb-org` is **not** in the default Ubuntu repositories. If `apt` still cannot find it, confirm `${VERSION_CODENAME}` is `jammy` (22.04) or `noble` (24.04).
+
+2. **Install MongoDB:**
+
+   ```bash
+   sudo apt-get install -y mongodb-org
+   ```
+
+3. **Start the MongoDB service:**
 
    ```bash
    sudo systemctl start mongod
    sudo systemctl enable mongod
    ```
 
-3. **Verify it is running:**
+   If systemd is disabled in WSL, use:
 
    ```bash
-   sudo systemctl status mongod
+   sudo service mongod start
    ```
 
-4. **Set your `.env` variable** in `server/.env`:
+4. **Verify it is running:**
+
+   ```bash
+   pgrep -a mongod
+   # or: sudo systemctl status mongod
+   ```
+
+5. **Set your `.env` variable** in `server/.env`:
 
    ```env
    MONGO_URI=mongodb://localhost:27017/optitrader_lab
    ```
 
-5. **Install Mongoose** (done automatically in §2a, but listed here for clarity):
+6. **Install Mongoose** (done automatically in §2a, but listed here for clarity):
 
    ```bash
    cd server
@@ -307,7 +328,7 @@ npm run config:check
 Before launching the full app, verify MongoDB wiring with ESM:
 
 ```bash
-npx tsx -e "import 'dotenv/config'; import connectDB from './database.ts'; await connectDB(); process.exit(0);"
+npm run db:check
 ```
 
 Expected output:
@@ -595,7 +616,7 @@ Use this to catch the most common setup failures before debugging:
 - [ ] `cd server && npm run config:check` prints `✅ Configuration valid`
 - [ ] `cd server && npm run typecheck && npm test` passes config, domain and bridge tests
 - [ ] `cd server && npm run test:bridge` passes against `test/fixtures/ohlcv.csv`
-- [ ] `npx tsx -e "import 'dotenv/config'; import connectDB from './database.ts'; await connectDB(); process.exit(0);"` prints `✅ MongoDB Connected`
+- [ ] `npm run db:check` prints `✅ MongoDB Connected`
 - [ ] `server/package.json` is valid JSON and contains `express`, `mongoose`, `dotenv`, `cors`, `@google/genai`
 - [ ] `npm run seed` in `server/` prints `🌱 Seed complete.` and the demo user
 - [ ] `prototypes/02-mid-fi/mockData.json` exists (seed source)
@@ -654,6 +675,63 @@ sudo mongod --dbpath /var/lib/mongodb --logpath /var/log/mongodb/mongod.log --fo
 ```
 
 Alternatively, use a MongoDB Atlas URI. If you want systemd inside WSL, enable it in `/etc/wsl.conf` (`[boot]` → `systemd=true`) and restart WSL.
+
+#### `mongod.service` start is canceled / systemd maintenance
+
+**Symptom:** `Job for mongod.service canceled`, or `systemctl is-system-running` returns `maintenance`.
+
+**Cause:** A failed `/etc/fstab` mount can leave systemd degraded. On WSL this is commonly an unavailable Windows drive such as `D:` mounted at `/mnt/d`.
+
+**Fix:** Check for failed units:
+
+```bash
+systemctl --failed
+systemctl is-system-running
+```
+
+If `mnt-d.mount` failed because the drive is unavailable, either mount it in Windows or remove/neutralize the fstab entry:
+
+```bash
+sudo cp /etc/fstab /etc/fstab.bak
+sudo sed -i '/^D:[[:space:]]/s/^/#/' /etc/fstab
+sudo systemctl daemon-reload
+sudo systemctl reset-failed mnt-d.mount
+```
+
+Alternatively, keep the `D:` mount but make it non-blocking with `nofail`:
+
+```bash
+sudo cp /etc/fstab /etc/fstab.bak
+sudo sed -i -E 's|^D:[[:space:]]+/mnt/d[[:space:]]+drvfs[[:space:]]+defaults[[:space:]]+0[[:space:]]+0$|D: /mnt/d drvfs defaults,nofail 0 0|' /etc/fstab
+grep '/mnt/d' /etc/fstab
+sudo systemctl daemon-reload
+sudo mount -a
+sudo systemctl reset-failed mnt-d.mount
+systemctl is-system-running
+```
+
+Then reset and start MongoDB:
+
+```bash
+sudo systemctl reset-failed mongod.service
+sudo systemctl start mongod
+sudo systemctl status mongod
+```
+
+To run MongoDB without systemd for local development:
+
+```bash
+mkdir -p "$HOME/.local/share/optitrader-mongodb"
+mongod --dbpath "$HOME/.local/share/optitrader-mongodb" \
+  --bind_ip 127.0.0.1 --port 27017 \
+  --logpath "$HOME/.local/share/optitrader-mongodb/mongod.log" --fork
+```
+
+Stop it with:
+
+```bash
+mongod --dbpath "$HOME/.local/share/optitrader-mongodb" --shutdown
+```
 
 #### Python version mismatch
 

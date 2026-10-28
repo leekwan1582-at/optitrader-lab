@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "seed": "tsx seed.ts",
     "seed:prod": "node dist/seed.js",
+    "db:check": "tsx scripts/check-db.ts",
     "test": "node --import tsx --test 'test/*.test.ts' '../test/*.test.ts'",
     "test:config": "node --import tsx --test test/config.test.ts",
     "test:bridge": "node --import tsx --test ../test/bridge.test.ts",
