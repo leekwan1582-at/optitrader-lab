@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { BacktestResult, RunConfig } from '../types/domain.js';
 import { AppError } from '../utils/errors.js';
+import { processRegistry } from './processRegistry.js';
 
 const ENGINE_SCRIPT = fileURLToPath(new URL('../../engine/backtest.py', import.meta.url));
 const PYTHON_CANDIDATES = [
@@ -46,12 +47,13 @@ function parseEngineError(stderr: string): string {
 }
 
 export interface RunBacktestInput {
+  runId?: string;
   csvPath: string;
   config: RunConfig | Record<string, unknown>;
   timeoutMs?: number;
 }
 
-export function runBacktest({ csvPath, config, timeoutMs = 120000 }: RunBacktestInput): Promise<BacktestResult> {
+export function runBacktest({ runId, csvPath, config, timeoutMs = 120000 }: RunBacktestInput): Promise<BacktestResult> {
   return new Promise((resolve, reject) => {
     if (!existsSync(ENGINE_SCRIPT)) {
       reject(new AppError('Backtest engine script not found.', 500, 'ENGINE_NOT_FOUND'));
@@ -70,6 +72,10 @@ export function runBacktest({ csvPath, config, timeoutMs = 120000 }: RunBacktest
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
     });
 
+    if (runId) {
+      processRegistry.register(runId, child);
+    }
+
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -77,30 +83,54 @@ export function runBacktest({ csvPath, config, timeoutMs = 120000 }: RunBacktest
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
+      if (runId) {
+        processRegistry.appendLog(runId, 'error', `Execution timeout (${Math.round(timeoutMs / 1000)}s reached).`);
+      }
       child.kill('SIGKILL');
       const error = new AppError(`Optimization exceeded ${Math.round(timeoutMs / 1000)}s.`, 504, 'TIMEOUT');
       reject(error);
     }, timeoutMs);
 
     child.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
+      const text = chunk.toString();
+      stdout += text;
+      if (runId) {
+        // Record engine progress or log lines
+        for (const line of text.split('\n').filter(Boolean)) {
+          processRegistry.appendLog(runId, 'info', `[engine stdout] ${line}`);
+        }
+      }
     });
 
     child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
+      const text = chunk.toString();
+      stderr += text;
+      if (runId) {
+        for (const line of text.split('\n').filter(Boolean)) {
+          processRegistry.appendLog(runId, 'warning', `[engine stderr] ${line}`);
+        }
+      }
     });
 
     child.on('error', (error: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (runId) {
+        processRegistry.appendLog(runId, 'error', `Process error: ${error.message}`);
+      }
       reject(new AppError(`Unable to start the Python engine: ${error.message}`, 500, 'ENGINE_START_FAILED'));
     });
 
-    child.on('close', (code: number | null) => {
+    child.on('close', (code: number | null, signal: string | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+
+      if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+        reject(new AppError('The optimization run was cancelled.', 499, 'RUN_CANCELLED'));
+        return;
+      }
 
       if (code !== 0) {
         reject(new AppError(parseEngineError(stderr), 500, 'ENGINE_ERROR'));

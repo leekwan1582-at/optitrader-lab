@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const strategyTypeSchema = z.enum(['sma_crossover', 'ema_momentum']);
 export const objectiveSchema = z.enum(['sharpe', 'total_return', 'calmar']);
-export const runStatusSchema = z.enum(['completed', 'failed', 'running', 'queued']);
+export const runStatusSchema = z.enum(['completed', 'failed', 'running', 'queued', 'cancelled']);
 
 export const parameterRangeSchema = z.object({
   min: z.coerce.number().int().positive(),
@@ -51,7 +51,27 @@ export const uploadDatasetSchema = z.object({
   status: z.enum(['validated', 'pending', 'invalid']).optional(),
 });
 
+export const datasetRowSchema = z.object({
+  timestamp: z.string(),
+  open: z.coerce.number(),
+  high: z.coerce.number(),
+  low: z.coerce.number(),
+  close: z.coerce.number(),
+  volume: z.coerce.number(),
+});
+
+export const datasetPreviewResponseSchema = z.object({
+  dataset_id: z.string(),
+  name: z.string(),
+  symbol: z.string(),
+  timeframe: z.string(),
+  total_rows: z.number(),
+  columns: z.array(z.string()),
+  preview_rows: z.array(datasetRowSchema),
+});
+
 export const profileSchema = z.object({
+
   profile_id: z.string().min(1),
   _id: z.string().optional(),
   owner: z.string().optional(),
@@ -73,7 +93,22 @@ export const createProfileSchema = z.object({
   path: ['params', 'slow_ma', 'min'],
 });
 
-export const updateProfileSchema = profileSchema.partial().omit({ profile_id: true });
+export const updateProfileSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  strategy_type: strategyTypeSchema.optional(),
+  objective: objectiveSchema.optional(),
+  max_drawdown_limit: z.coerce.number().gt(0).lte(1).optional(),
+  params: strategyParamsSchema.optional(),
+}).refine((profile) => {
+  if (profile.params) {
+    return profile.params.fast_ma.max < profile.params.slow_ma.min;
+  }
+  return true;
+}, {
+  message: 'Fast MA range must stay below the slow MA range.',
+  path: ['params', 'slow_ma', 'min'],
+});
+
 
 export const bestMetricsSchema = z.object({
   fast_ma: z.coerce.number().int(),
@@ -81,8 +116,13 @@ export const bestMetricsSchema = z.object({
   sharpe: z.coerce.number(),
   total_return: z.coerce.number(),
   max_drawdown: z.coerce.number(),
+  calmar_ratio: z.coerce.number().optional(),
+  win_rate: z.coerce.number().optional(),
   profit_factor: z.coerce.number(),
   trades: z.coerce.number().int().nonnegative(),
+  oos_sharpe: z.coerce.number().optional(),
+  oos_total_return: z.coerce.number().optional(),
+  oos_max_drawdown: z.coerce.number().optional(),
 });
 
 export const robustnessSchema = z.object({
@@ -92,6 +132,8 @@ export const robustnessSchema = z.object({
   transaction_costs_included: z.boolean(),
   walk_forward_completed: z.boolean(),
   warnings: z.array(z.string()),
+  insufficient_sample: z.boolean().optional(),
+  low_trade_count: z.boolean().optional(),
 });
 
 export const aiSummarySchema = z.object({
@@ -101,6 +143,7 @@ export const aiSummarySchema = z.object({
 });
 
 export const runConfigSchema = z.object({
+  profile_id: z.string().trim().min(1).optional(),
   prompt: z.string().trim().max(2000).optional(),
   strategy_type: strategyTypeSchema,
   dataset_id: z.string().trim().min(1),
@@ -114,6 +157,7 @@ export const runConfigSchema = z.object({
   message: 'Fast MA range must stay below the slow MA range.',
   path: ['slow_ma', 'min'],
 });
+
 
 export const parsedConfigSchema = runConfigSchema.and(z.object({
   estimated_combinations: z.coerce.number().int().nonnegative().optional(),
@@ -135,6 +179,7 @@ export const runSchema = z.object({
   owner: z.string().optional(),
   profile_id: z.string().min(1),
   dataset_id: z.string().min(1),
+  retried_from: z.string().optional(),
   run_hash: z.string().optional(),
   config: runConfigSchema.optional(),
   profile_snapshot: profileSnapshotSchema.optional(),
@@ -170,6 +215,46 @@ export const settingsSchema = z.object({
   default_objective: objectiveSchema.optional(),
 });
 
+export const runFilterQuerySchema = z.object({
+  status: runStatusSchema.optional(),
+  strategy_type: strategyTypeSchema.optional(),
+  dataset_id: z.string().optional(),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+});
+
+export const errorLogQuerySchema = z.object({
+  severity: z.enum(['info', 'warning', 'error']).optional(),
+  experiment_id: z.string().optional(),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(50),
+});
+
+export const runLogEntrySchema = z.object({
+  timestamp: z.coerce.date(),
+  level: z.string(),
+  message: z.string(),
+});
+
+export const runLogsResponseSchema = z.object({
+  run_id: z.string(),
+  status: runStatusSchema,
+  logs: z.array(runLogEntrySchema),
+});
+
+export function paginatedResponseSchema<T extends z.ZodTypeAny>(itemSchema: T) {
+  return z.object({
+    items: z.array(itemSchema),
+    total: z.number().int().nonnegative(),
+    page: z.number().int().positive(),
+    limit: z.number().int().positive(),
+    totalPages: z.number().int().nonnegative(),
+  });
+}
+
+export const paginatedRunsResponseSchema = paginatedResponseSchema(runSchema);
+export const paginatedErrorLogsResponseSchema = paginatedResponseSchema(errorLogSchema);
+
 export const compareQuerySchema = z.object({
   ids: z.string().trim().min(1),
 });
@@ -190,7 +275,10 @@ export type ParameterRange = z.infer<typeof parameterRangeSchema>;
 export type StrategyParams = z.infer<typeof strategyParamsSchema>;
 export type Workspace = z.infer<typeof workspaceSchema>;
 export type Dataset = z.infer<typeof datasetSchema>;
+export type DatasetRow = z.infer<typeof datasetRowSchema>;
+export type DatasetPreviewResponse = z.infer<typeof datasetPreviewResponseSchema>;
 export type UploadDataset = z.infer<typeof uploadDatasetSchema>;
+
 export type Profile = z.infer<typeof profileSchema>;
 export type CreateProfileInput = z.infer<typeof createProfileSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
@@ -204,4 +292,10 @@ export type Run = z.infer<typeof runSchema>;
 export type ErrorLog = z.infer<typeof errorLogSchema>;
 export type Settings = z.infer<typeof settingsSchema>;
 export type WorkspaceBootstrap = z.infer<typeof workspaceBootstrapSchema>;
+export type RunFilterQuery = z.infer<typeof runFilterQuerySchema>;
+export type ErrorLogQuery = z.infer<typeof errorLogQuerySchema>;
+export type RunLogEntry = z.infer<typeof runLogEntrySchema>;
+export type RunLogsResponse = z.infer<typeof runLogsResponseSchema>;
+export type PaginatedRunsResponse = z.infer<typeof paginatedRunsResponseSchema>;
+export type PaginatedErrorLogsResponse = z.infer<typeof paginatedErrorLogsResponseSchema>;
 export type CompareQuery = z.infer<typeof compareQuerySchema>;

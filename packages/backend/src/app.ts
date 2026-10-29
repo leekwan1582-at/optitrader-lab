@@ -10,6 +10,7 @@ import runRoutes from './routes/runRoutes.js';
 import { requireAuth } from './middleware/auth.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { originCheck } from './middleware/originCheck.js';
+import { requestIdMiddleware } from './middleware/requestId.js';
 import type { AppConfig } from './types/domain.js';
 
 export function createApp(config: AppConfig): Express {
@@ -18,6 +19,7 @@ export function createApp(config: AppConfig): Express {
   app.disable('x-powered-by');
   app.locals.config = config;
 
+  app.use(requestIdMiddleware);
   app.use(cors({
     origin: config.clientUrl,
     credentials: true,

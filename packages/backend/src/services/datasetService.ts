@@ -1,15 +1,12 @@
-import { createHash } from 'node:crypto';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { readFile } from 'node:fs/promises';
 import Dataset, { type DatasetDocument } from '../models/Dataset.js';
-import type { CsvMetadata, DatasetData } from '../types/domain.js';
+import Run from '../models/Run.js';
+import type { DatasetData } from '../types/domain.js';
+import type { DatasetPreviewResponse } from '@optitrader/shared';
 import { AppError, NotFoundError } from '../utils/errors.js';
 import { createId } from '../utils/ids.js';
-import { parseCsvMetadata } from '../utils/csv.js';
-import { checksumBuffer } from '../utils/runHash.js';
-
-const UPLOAD_DIR = fileURLToPath(new URL('../uploads/', import.meta.url));
+import { validateAndParseCsv } from '../utils/csv.js';
+import { defaultStorage, type DatasetStorageAdapter } from './storageAdapter.js';
 
 export interface CreateDatasetInput {
   name: string;
@@ -19,6 +16,8 @@ export interface CreateDatasetInput {
   date_range?: string;
   rows?: number;
   csvText?: string;
+  csvBuffer?: Buffer;
+  originalFilename?: string;
   status?: 'validated' | 'pending' | 'invalid';
 }
 
@@ -27,72 +26,28 @@ export interface DatasetFile {
   checksum: string;
 }
 
-function mulberry32(seed: number): () => number {
-  let value = seed >>> 0;
-  return function random(): number {
-    value += 0x6D2B79F5;
-    let result = value;
-    result = Math.imul(result ^ (result >>> 15), result | 1);
-    result ^= result + Math.imul(result ^ (result >>> 7), result | 61);
-    return ((result ^ (result >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function seedFromString(value: string): number {
-  return Number.parseInt(createHash('sha256').update(value).digest('hex').slice(0, 8), 16);
-}
-
-function startDateFor(dataset: DatasetData): Date {
-  const first = String(dataset.date_range || '').split(' to ')[0];
-  const parsed = new Date(first ?? '');
-  if (!Number.isNaN(parsed.valueOf())) return parsed;
-  return new Date(Date.now() - (dataset.rows || 500) * 24 * 60 * 60 * 1000);
-}
-
-function buildSyntheticCsv(dataset: DatasetData): string {
-  const rows = Math.min(Math.max(Number(dataset.rows) || 500, 260), 5000);
-  const random = mulberry32(seedFromString(dataset._id));
-  const start = startDateFor(dataset);
-  const lines = ['timestamp,open,high,low,close,volume'];
-  let price = 1.05 + random() * 0.4;
-
-  for (let index = 0; index < rows; index += 1) {
-    const timestamp = new Date(start.getTime() + index * 60 * 60 * 1000).toISOString();
-    const drift = (random() - 0.48) * 0.004;
-    const open = price;
-    const close = Math.max(0.0001, open * (1 + drift));
-    const high = Math.max(open, close) * (1 + random() * 0.0025);
-    const low = Math.min(open, close) * (1 - random() * 0.0025);
-    const volume = Math.round(800 + random() * 9000);
-    lines.push(`${timestamp},${open.toFixed(5)},${high.toFixed(5)},${low.toFixed(5)},${close.toFixed(5)},${volume}`);
-    price = close;
+/**
+ * Creates and stores a new dataset from CSV text or buffer.
+ */
+export async function createDataset(
+  owner: string,
+  input: CreateDatasetInput,
+  storage: DatasetStorageAdapter = defaultStorage
+): Promise<DatasetDocument> {
+  let content = input.csvBuffer;
+  if (!content && input.csvText) {
+    content = Buffer.from(input.csvText, 'utf8');
   }
 
-  return lines.join('\n');
-}
-
-export function resolveDatasetPath(dataset: DatasetData): string | null {
-  if (!dataset.file_ref) return null;
-  return fileURLToPath(new URL(`../${dataset.file_ref}`, import.meta.url));
-}
-
-export async function createDataset(owner: string, input: CreateDatasetInput): Promise<DatasetDocument> {
-  if (!input.csvText && !input.rows) {
-    throw new AppError('Provide CSV content or a row count.', 422, 'DATASET_METADATA_REQUIRED');
+  if (!content) {
+    throw new AppError('A valid CSV file or content is required.', 422, 'DATASET_METADATA_REQUIRED');
   }
+
+  const csvString = content.toString('utf8');
+  const validated = validateAndParseCsv(csvString);
 
   const datasetId = createId('ds');
-  let parsed: CsvMetadata | null = null;
-  let fileRef: string | null = null;
-  let originalFilename: string | null = null;
-
-  if (input.csvText) {
-    parsed = parseCsvMetadata(input.csvText);
-    await mkdir(UPLOAD_DIR, { recursive: true });
-    fileRef = `uploads/${datasetId}.csv`;
-    originalFilename = `${input.name}.csv`;
-    await writeFile(fileURLToPath(new URL(`../${fileRef}`, import.meta.url)), input.csvText, 'utf8');
-  }
+  const saveResult = await storage.save(owner, datasetId, content);
 
   return Dataset.create({
     _id: datasetId,
@@ -100,46 +55,124 @@ export async function createDataset(owner: string, input: CreateDatasetInput): P
     name: input.name,
     symbol: input.symbol,
     timeframe: input.timeframe,
-    date_range: input.dateRange || input.date_range || parsed?.dateRange || '—',
-    rows: parsed?.rows ?? input.rows ?? 0,
+    date_range: validated.metadata.dateRange,
+    rows: validated.metadata.rows,
     status: input.status || 'validated',
-    file_ref: fileRef,
-    original_filename: originalFilename,
+    file_ref: saveResult.fileRef,
+    original_filename: input.originalFilename || `${input.name}.csv`,
   });
 }
 
+/**
+ * Lists all datasets belonging to an owner.
+ */
 export async function listDatasets(owner: string): Promise<DatasetDocument[]> {
   return Dataset.find({ owner }).sort({ createdAt: -1 });
 }
 
+/**
+ * Gets a specific dataset by ID and owner.
+ */
 export async function getDataset(owner: string, datasetId: string): Promise<DatasetDocument> {
   const dataset = await Dataset.findOne({ _id: datasetId, owner });
   if (!dataset) throw new NotFoundError('Dataset not found.');
   return dataset;
 }
 
-export async function deleteDataset(owner: string, datasetId: string): Promise<void> {
+/**
+ * Deletes a dataset if it is not referenced by any active or completed runs.
+ */
+export async function deleteDataset(
+  owner: string,
+  datasetId: string,
+  storage: DatasetStorageAdapter = defaultStorage
+): Promise<void> {
   const dataset = await getDataset(owner, datasetId);
-  const path = resolveDatasetPath(dataset.toObject());
-  if (path && existsSync(path)) {
-    await unlink(path).catch(() => undefined);
+
+  // Check referential integrity: reject if used in runs
+  const runInUse = await Run.exists({ dataset_id: datasetId, owner });
+  if (runInUse) {
+    throw new AppError(
+      'Cannot delete dataset because it is referenced by existing runs. Archive or remove associated runs first.',
+      409,
+      'DATASET_IN_USE'
+    );
   }
+
+  if (dataset.file_ref) {
+    await storage.delete(dataset.file_ref);
+  }
+
   await Dataset.deleteOne({ _id: dataset._id, owner });
 }
 
-export async function ensureDatasetFile(dataset: DatasetData): Promise<DatasetFile> {
-  const existing = resolveDatasetPath(dataset);
-  if (existing && existsSync(existing)) {
-    const buffer = await readFile(existing);
-    return { path: existing, checksum: checksumBuffer(buffer) };
+/**
+ * Retrieves the first preview rows for a dataset.
+ */
+export async function getDatasetPreview(
+  owner: string,
+  datasetId: string,
+  storage: DatasetStorageAdapter = defaultStorage
+): Promise<DatasetPreviewResponse> {
+  const dataset = await getDataset(owner, datasetId);
+
+  if (!dataset.file_ref) {
+    throw new NotFoundError('Dataset file is missing.');
   }
 
-  await mkdir(UPLOAD_DIR, { recursive: true });
-  const fileRef = `uploads/${dataset._id}.csv`;
-  const path = fileURLToPath(new URL(`../${fileRef}`, import.meta.url));
-  const csv = buildSyntheticCsv(dataset);
-  await writeFile(path, csv, 'utf8');
-  await Dataset.updateOne({ _id: dataset._id }, { file_ref: fileRef });
+  const localPath = await storage.getLocalPath(dataset.file_ref);
+  const exists = await storage.exists(dataset.file_ref);
+  if (!exists) {
+    throw new NotFoundError('Dataset file not found on disk.');
+  }
 
-  return { path, checksum: checksumBuffer(Buffer.from(csv)) };
+  const content = await readFile(localPath, 'utf8');
+  const validated = validateAndParseCsv(content);
+
+  return {
+    dataset_id: dataset._id,
+    name: dataset.name,
+    symbol: dataset.symbol,
+    timeframe: dataset.timeframe,
+    total_rows: validated.metadata.rows,
+    columns: validated.metadata.columns ?? ['timestamp', 'open', 'high', 'low', 'close', 'volume'],
+    preview_rows: validated.previewRows,
+  };
+}
+
+/**
+ * Resolves the absolute local filesystem path for a dataset's stored CSV file.
+ */
+export async function resolveDatasetPath(
+  dataset: DatasetData,
+  storage: DatasetStorageAdapter = defaultStorage
+): Promise<string | null> {
+  if (!dataset.file_ref) return null;
+  return storage.getLocalPath(dataset.file_ref);
+}
+
+/**
+ * Ensures the physical CSV file exists on disk and returns its path and sha256 checksum.
+ */
+export async function ensureDatasetFile(
+  dataset: DatasetData,
+  storage: DatasetStorageAdapter = defaultStorage
+): Promise<DatasetFile> {
+  if (!dataset.file_ref) {
+    throw new NotFoundError(`Dataset ${dataset._id} has no file reference associated.`);
+  }
+
+  const exists = await storage.exists(dataset.file_ref);
+  if (!exists) {
+    throw new NotFoundError(`Dataset file not found for ${dataset._id}.`);
+  }
+
+  const localPath = await storage.getLocalPath(dataset.file_ref);
+  const buffer = await readFile(localPath);
+  const { checksumBuffer } = await import('../utils/runHash.js');
+
+  return {
+    path: localPath,
+    checksum: checksumBuffer(buffer),
+  };
 }

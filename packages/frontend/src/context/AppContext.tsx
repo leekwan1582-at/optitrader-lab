@@ -10,16 +10,20 @@ import {
 } from 'react';
 import { api } from '../api/index';
 import type {
+  ChangePasswordInput,
   CreateProfileInput,
   Dataset,
   ErrorLog,
   LoginInput,
   ParsedConfig,
   Profile,
+  RegisterInput,
   Run,
   RunConfig,
   Session,
   Settings,
+  UpdateAccountInput,
+  UpdateProfileInput,
   UploadDataset,
   User,
   Workspace,
@@ -38,17 +42,26 @@ interface AppContextValue {
   error: string | null;
   isAuthenticated: boolean;
   login: (credentials: LoginInput) => Promise<Session>;
+  register: (input: RegisterInput) => Promise<Session>;
+  changePassword: (input: ChangePasswordInput) => Promise<User>;
+  updateAccount: (input: UpdateAccountInput) => Promise<User>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
-  uploadDataset: (dataset: UploadDataset) => Promise<Dataset>;
+  uploadDataset: (dataset: UploadDataset | FormData, onProgress?: (percent: number) => void) => Promise<Dataset>;
   removeDataset: (datasetId: string) => Promise<void>;
   createProfile: (profile: CreateProfileInput) => Promise<Profile>;
+  updateProfile: (profileId: string, profile: UpdateProfileInput) => Promise<Profile>;
+  cloneProfile: (profileId: string) => Promise<Profile>;
+  removeProfile: (profileId: string) => Promise<void>;
   parsePrompt: (prompt: string) => Promise<ParsedConfig>;
   launchRun: (config: RunConfig) => Promise<Run>;
+  cancelRun: (runId: string) => Promise<Run>;
+  retryRun: (runId: string) => Promise<Run>;
   cloneRun: (runId: string) => Promise<RunConfig>;
   compareRuns: (ids: string[]) => Promise<Run[]>;
   resetDemo: () => Promise<boolean>;
 }
+
 
 const AppContext = createContext<AppContextValue | null>(null);
 
@@ -127,22 +140,51 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return result;
   }, [loadBootstrap]);
 
+  const register = useCallback(async (input: RegisterInput): Promise<Session> => {
+    setError(null);
+    const result = await api.register(input);
+    setUser(result.user);
+    await loadBootstrap();
+    return result;
+  }, [loadBootstrap]);
+
+  const changePassword = useCallback(async (input: ChangePasswordInput): Promise<User> => {
+    const updated = await api.changePassword(input);
+    setUser(updated);
+    return updated;
+  }, []);
+
+  const updateAccount = useCallback(async (input: UpdateAccountInput): Promise<User> => {
+    const updated = await api.updateAccount(input);
+    setUser(updated);
+    if (updated.workspaceName) {
+      const newWsName = updated.workspaceName;
+      setWorkspace((current) => (current ? { ...current, name: newWsName } : current));
+    }
+    return updated;
+  }, []);
+
+
   const logout = useCallback(async (): Promise<void> => {
     await api.logout();
     setUser(null);
     clearWorkspace();
   }, [clearWorkspace]);
 
+
   const refresh = useCallback(async (): Promise<void> => {
     if (!user) return;
     await loadBootstrap();
   }, [loadBootstrap, user]);
 
-  const uploadDataset = useCallback(async (dataset: UploadDataset): Promise<Dataset> => {
-    const created = await api.uploadDataset(dataset);
-    setDatasets((current) => [created, ...current]);
-    return created;
-  }, []);
+  const uploadDataset = useCallback(
+    async (dataset: UploadDataset | FormData, onProgress?: (percent: number) => void): Promise<Dataset> => {
+      const created = await api.uploadDataset(dataset, onProgress);
+      setDatasets((current) => [created, ...current]);
+      return created;
+    },
+    []
+  );
 
   const removeDataset = useCallback(async (datasetId: string): Promise<void> => {
     await api.deleteDataset(datasetId);
@@ -155,6 +197,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return created;
   }, []);
 
+  const updateProfile = useCallback(async (profileId: string, profile: UpdateProfileInput): Promise<Profile> => {
+    const updated = await api.updateProfile(profileId, profile);
+    setProfiles((current) => current.map((p) => p.profile_id === profileId ? updated : p));
+    return updated;
+  }, []);
+
+  const cloneProfile = useCallback(async (profileId: string): Promise<Profile> => {
+    const cloned = await api.cloneProfile(profileId);
+    setProfiles((current) => [cloned, ...current]);
+    return cloned;
+  }, []);
+
+  const removeProfile = useCallback(async (profileId: string): Promise<void> => {
+    await api.deleteProfile(profileId);
+    setProfiles((current) => current.filter((p) => p.profile_id !== profileId));
+  }, []);
+
+
   const parsePrompt = useCallback(
     (prompt: string): Promise<ParsedConfig> => api.parsePrompt(prompt, datasets),
     [datasets]
@@ -164,6 +224,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const run = await api.launchRun(config);
     setRuns((current) => [run, ...current]);
     return run;
+  }, []);
+
+  const cancelRun = useCallback(async (runId: string): Promise<Run> => {
+    const cancelled = await api.cancelRun(runId);
+    setRuns((current) => current.map((r) => r.run_id === runId ? cancelled : r));
+    return cancelled;
+  }, []);
+
+  const retryRun = useCallback(async (runId: string): Promise<Run> => {
+    const retried = await api.retryRun(runId);
+    setRuns((current) => [retried, ...current]);
+    return retried;
   }, []);
 
   const cloneRun = useCallback(
@@ -195,13 +267,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     error,
     isAuthenticated: Boolean(user),
     login,
+    register,
+    changePassword,
+    updateAccount,
     logout,
     refresh,
     uploadDataset,
     removeDataset,
     createProfile,
+    updateProfile,
+    cloneProfile,
+    removeProfile,
     parsePrompt,
     launchRun,
+    cancelRun,
+    retryRun,
     cloneRun,
     compareRuns,
     resetDemo,
@@ -216,17 +296,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     loading,
     error,
     login,
+    register,
+    changePassword,
+    updateAccount,
     logout,
     refresh,
     uploadDataset,
     removeDataset,
     createProfile,
+    updateProfile,
+    cloneProfile,
+    removeProfile,
     parsePrompt,
     launchRun,
+    cancelRun,
+    retryRun,
     cloneRun,
     compareRuns,
     resetDemo,
   ]);
+
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

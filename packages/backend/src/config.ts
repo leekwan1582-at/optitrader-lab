@@ -9,7 +9,7 @@ const PLACEHOLDER_KEYS = new Set([
 ]);
 const ALLOWED_ENVIRONMENTS = ['development', 'test', 'production'] as const;
 const DEFAULT_PORT = 5000;
-const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 const DEFAULT_ACCESS_TTL = '15m';
 const DEFAULT_REFRESH_TTL = '7d';
 const DEV_ACCESS_SECRET = 'optitrader-dev-access-secret-change-before-production-32';
@@ -136,6 +136,10 @@ export function validateConfig(env: Env = {}): AppConfig {
     errors.push('COOKIE_DOMAIN must be a domain such as .optitrader.dev.');
   }
 
+  const uploadDir = String(env.UPLOAD_DIR ?? 'uploads').trim() || 'uploads';
+  const rawMaxMb = Number(env.MAX_UPLOAD_MB ?? 50);
+  const maxUploadMb = Number.isFinite(rawMaxMb) && rawMaxMb > 0 ? rawMaxMb : 50;
+
   if (errors.length > 0) {
     throw new ConfigError(errors);
   }
@@ -152,7 +156,10 @@ export function validateConfig(env: Env = {}): AppConfig {
     accessTokenTtl,
     refreshTokenTtl,
     cookieDomain: cookieDomain || null,
+    uploadDir,
+    maxUploadMb,
   };
+
 }
 
 export function loadConfig(env: Env = process.env): AppConfig {

@@ -21,6 +21,8 @@ const testConfig: AppConfig = {
   accessTokenTtl: '15m',
   refreshTokenTtl: '7d',
   cookieDomain: null,
+  uploadDir: 'uploads',
+  maxUploadMb: 50,
 };
 
 let mongo: MongoMemoryServer;

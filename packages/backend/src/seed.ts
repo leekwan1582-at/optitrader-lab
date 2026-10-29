@@ -75,10 +75,13 @@ interface MockData {
   settings?: Record<string, unknown>;
 }
 
+import { defaultStorage } from './services/storageAdapter.js';
+
 // Adjust if your folder layout differs
 const MOCK_DATA_PATH = fileURLToPath(
-  new URL('../../../prototypes/02-mid-fi/mockData.json', import.meta.url)
+  new URL('../fixtures/mockData.json', import.meta.url)
 );
+
 
 async function seed(): Promise<void> {
   logger.info('🌱 Seeding database...');
@@ -127,18 +130,46 @@ async function seed(): Promise<void> {
   }
 
   if (Array.isArray(data.datasets) && data.datasets.length) {
-    const datasetDocs = data.datasets.map((d) => ({
-      _id: d.dataset_id,
-      owner,
-      name: d.name,
-      symbol: d.symbol,
-      timeframe: d.timeframe,
-      date_range: d.date_range,
-      rows: d.rows,
-      status: d.status,
-    }));
+    const datasetDocs = await Promise.all(
+      data.datasets.map(async (d) => {
+        // Generate a synthetic OHLCV CSV so preview & backtests have a real physical file on disk
+        const startPrice = d.symbol === 'EURUSD' ? 1.10 : d.symbol === 'ES' ? 4500 : 15000;
+        const rowsCount = Math.min(d.rows || 100, 300); // write 300 realistic rows for fast seeding
+        const csvLines = ['timestamp,open,high,low,close,volume'];
+        const baseDate = new Date(Date.UTC(2023, 0, 1));
+
+        for (let i = 0; i < rowsCount; i++) {
+          const date = new Date(baseDate.getTime() + i * (d.timeframe === '1H' ? 3600000 : 86400000));
+          const dateStr = date.toISOString().replace('T', ' ').slice(0, 19);
+          // Keep spread proportional to asset price (EURUSD spread is ~0.0005, ES spread is ~5)
+          const spread = startPrice * 0.002;
+          const noise = Math.sin(i / 10) * (startPrice * 0.01);
+          const open = Math.max(0.0001, startPrice + noise);
+          const high = open + spread;
+          const low = Math.max(0.0001, open - spread);
+          const close = open + (noise * 0.2);
+          const volume = Math.floor(1000 + Math.random() * 500);
+          csvLines.push(`${dateStr},${open.toFixed(4)},${high.toFixed(4)},${low.toFixed(4)},${close.toFixed(4)},${volume}`);
+        }
+
+        const saved = await defaultStorage.save(owner, d.dataset_id, csvLines.join('\n'));
+
+        return {
+          _id: d.dataset_id,
+          owner,
+          name: d.name,
+          symbol: d.symbol,
+          timeframe: d.timeframe,
+          date_range: d.date_range,
+          rows: d.rows,
+          file_ref: saved.fileRef,
+          original_filename: `${d.name.toLowerCase()}.csv`,
+          status: d.status,
+        };
+      })
+    );
     await Dataset.insertMany(datasetDocs);
-    logger.info(`  ✅ Datasets: ${datasetDocs.length}`);
+    logger.info(`  ✅ Datasets & CSV files created: ${datasetDocs.length}`);
   }
 
   if (Array.isArray(data.profiles) && data.profiles.length) {

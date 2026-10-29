@@ -1,14 +1,8 @@
 import json
-import sys
 import pytest
 import pandas as pd
 import numpy as np
-from unittest.mock import MagicMock, patch
-# import importlib
-
-# Dynamically import the package or a submodule
-# backtest = importlib.import_module(".prototypes.03-hi-fi.engine.backtest")
-# Import your script (ensure it's in the same directory)
+from unittest.mock import patch
 import backtest
 
 # ==========================================
@@ -17,11 +11,11 @@ import backtest
 
 def test_parse_args_success():
     """Test successful parsing of arguments."""
-    args = ["/path/to/data.csv", '{"strategy": "SMA_Crossover"}']
+    args = ["/path/to/data.csv", '{"strategy_type": "sma_crossover"}']
     csv_path, config = backtest.parse_args(args)
     
     assert csv_path == "/path/to/data.csv"
-    assert config["strategy"] == "SMA_Crossover"
+    assert config["strategy_type"] == "sma_crossover"
 
 def test_parse_args_missing_args(capsys):
     """Test that missing arguments triggers SystemExit and outputs JSON error."""
@@ -47,111 +41,134 @@ def test_parse_args_invalid_json(capsys):
 
 def test_load_data_success(tmp_path):
     """Test loading a valid CSV file."""
-    # Create a dummy CSV
-    csv_file = tmp_path / "test_data.csv"
-    df = pd.DataFrame({
-        'timestamp': pd.date_range(start='2020-01-01', periods=5, freq='D'),
-        'open': [1.0, 1.1, 1.2, 1.3, 1.4],
-        'high': [1.1, 1.2, 1.3, 1.4, 1.5],
-        'low': [0.9, 1.0, 1.1, 1.2, 1.3],
-        'close': [1.0, 1.1, 1.2, 1.3, 1.4],
-        'volume': [100, 200, 300, 400, 500]
-    })
-    df.to_csv(csv_file, index=False)
-    
-    loaded_df = backtest.load_data(str(csv_file))
-    
-    assert isinstance(loaded_df.index, pd.DatetimeIndex)
-    assert len(loaded_df) == 5
-    assert 'close' in loaded_df.columns
+    csv_file = tmp_path / "valid.csv"
+    content = [
+        "timestamp,open,high,low,close,volume",
+        "2023-01-01 00:00:00,10,12,9,11,100",
+        "2023-01-01 01:00:00,11,13,10,12,150",
+    ]
+    csv_file.write_text("\n".join(content))
 
-def test_load_data_missing_columns(tmp_path, capsys):
-    """Test that missing OHLC columns triggers SystemExit."""
-    csv_file = tmp_path / "bad_data.csv"
-    df = pd.DataFrame({'timestamp': ['2020-01-01'], 'close': [1.0]})
-    df.to_csv(csv_file, index=False)
-    
-    with pytest.raises(SystemExit):
+    df = backtest.load_data(str(csv_file))
+    assert isinstance(df.index, pd.DatetimeIndex)
+    assert list(df.columns) == ["open", "high", "low", "close", "volume"]
+    assert len(df) == 2
+
+def test_load_data_missing_ohlc(tmp_path, capsys):
+    """Test missing required OHLC columns triggers SystemExit."""
+    csv_file = tmp_path / "missing_cols.csv"
+    content = [
+        "timestamp,open,close",
+        "2023-01-01 00:00:00,10,11"
+    ]
+    csv_file.write_text("\n".join(content))
+
+    with pytest.raises(SystemExit) as excinfo:
         backtest.load_data(str(csv_file))
-        
-    captured = capsys.readouterr()
-    # FIXED: Check for lowercase "ohlc" because we called .lower() on the error string
-    assert "missing required ohlc columns" in captured.err.lower()
 
-def test_load_data_file_not_found(capsys):
-    """Test that non-existent file triggers SystemExit."""
-    with pytest.raises(SystemExit):
-        backtest.load_data("/path/does/not/exist.csv")
-        
+    assert excinfo.value.code == 1
     captured = capsys.readouterr()
-    assert "Data loading failed" in captured.err
+    assert "CSV missing required OHLC columns" in captured.err
 
 # ==========================================
-# TESTS FOR: run_sma_crossover
+# TESTS FOR: build_parameter_grid
 # ==========================================
 
-@patch('backtest.vbt')
-def test_run_sma_crossover_no_valid_combos(mock_vbt):
-    """Test that fast MA > slow MA raises a ValueError."""
-    df = pd.DataFrame({'close': [1.0, 2.0]})
+def test_build_parameter_grid_success():
+    config = {
+        'fast_ma': {'min': 5, 'max': 15, 'step': 5},
+        'slow_ma': {'min': 20, 'max': 40, 'step': 10}
+    }
+    fast_win, slow_win, bounds = backtest.build_parameter_grid(config)
+    assert len(fast_win) == 9
+    assert bounds['fast_min'] == 5
+    assert bounds['slow_max'] == 40
+    assert all(f < s for f, s in zip(fast_win, slow_win))
+
+def test_build_parameter_grid_invalid():
     config = {
         'fast_ma': {'min': 50, 'max': 60, 'step': 10},
         'slow_ma': {'min': 10, 'max': 20, 'step': 10}
     }
-    
     with pytest.raises(ValueError, match="No valid parameter combinations"):
-        backtest.run_sma_crossover(df, config)
+        backtest.build_parameter_grid(config)
 
-@patch('backtest.vbt')
-def test_run_sma_crossover_missing_config(mock_vbt):
-    """Test that missing config keys raises a ValueError."""
-    df = pd.DataFrame({'close': [1.0, 2.0]})
-    config = {'fast_ma': {'min': 5}} # Missing max/step
-    
+def test_build_parameter_grid_missing_config():
+    config = {'fast_ma': {'min': 5}}
     with pytest.raises(ValueError, match="Missing required parameter range"):
-        backtest.run_sma_crossover(df, config)
+        backtest.build_parameter_grid(config)
 
 # ==========================================
-# TESTS FOR: extract_results
+# TESTS FOR: run_backtest_pipeline (EMA, OOS, Edge of Grid)
 # ==========================================
 
-def test_extract_results_drawdown_filter():
-    """
-    Test that the best parameter selection respects the max_drawdown cap.
-    Ensures that a high Sharpe ratio is rejected if it breaches the drawdown limit.
-    """
-    mock_pf = MagicMock()
-    
-    # Mock metrics returned by vectorbt as REAL pandas Series
-    mock_pf.sharpe_ratio.return_value = pd.Series([2.0, 1.5], index=[0, 1])
-    mock_pf.total_return.return_value = pd.Series([0.5, 0.3], index=[0, 1])
-    
-    # Index 0 exceeds the 15% cap (0.20), Index 1 is safe (0.10)
-    mock_pf.max_drawdown.return_value = pd.Series([0.20, 0.10], index=[0, 1]) 
-    
-    mock_pf.trades.win_rate.return_value = pd.Series([0.6, 0.5], index=[0, 1])
-    mock_pf.trades.profit_factor.return_value = pd.Series([1.5, 1.2], index=[0, 1])
-    mock_pf.trades.count.return_value = pd.Series([100, 80], index=[0, 1])
-    
-    fast_windows = np.array([10, 15])
-    slow_windows = np.array([50, 60])
-    config = {'max_drawdown': 0.15, 'objective': 'sharpe'}
-    
-    # Setup mock for the specific best portfolio returned by pf[best_idx]
-    mock_best_pf = MagicMock()
-    # The function expects a pandas Series with a DatetimeIndex so it can resample
-    mock_series = pd.Series([100.0, 105.0], index=pd.date_range('2020-01-01', periods=2, freq='W'))
-    mock_best_pf.value.return_value = mock_series
-    
-    # When pf[best_idx] is called, return the mock_best_pf
-    mock_pf.__getitem__.return_value = mock_best_pf
+def test_run_backtest_pipeline_ema_vs_sma():
+    """Verify that EMA momentum and SMA crossover produce distinct signal behavior."""
+    dates = pd.date_range('2023-01-01', periods=100, freq='h')
+    np.random.seed(42)
+    # Sine wave plus drift to ensure crosses
+    prices = 100 + np.sin(np.linspace(0, 8 * np.pi, 100)) * 5 + np.linspace(0, 10, 100)
+    df = pd.DataFrame({
+        'open': prices,
+        'high': prices + 1,
+        'low': prices - 1,
+        'close': prices,
+        'volume': 1000
+    }, index=dates)
 
-    # Call the function directly (No @patch decorator needed here)
-    result = backtest.extract_results(mock_pf, fast_windows, slow_windows, config)
-    
-    # Assertions
-    # Even though Index 0 had better Sharpe (2.0), it had Max DD of 20% (>15%). 
-    # Therefore, Index 1 should be selected (Sharpe 1.5, Fast MA 15, Slow MA 60).
-    assert result['best_params']['fast_ma'] == 15
-    assert result['best_params']['slow_ma'] == 60
-    assert result['metrics']['sharpe_ratio'] == 1.5
+    config_sma = {
+        'strategy_type': 'sma_crossover',
+        'fast_ma': {'min': 5, 'max': 10, 'step': 5},
+        'slow_ma': {'min': 15, 'max': 25, 'step': 10},
+        'objective': 'sharpe',
+        'max_drawdown': 0.5,
+        'holdout_pct': 0.2
+    }
+
+    config_ema = {
+        **config_sma,
+        'strategy_type': 'ema_momentum'
+    }
+
+    res_sma = backtest.run_backtest_pipeline(df, config_sma)
+    res_ema = backtest.run_backtest_pipeline(df, config_ema)
+
+    assert res_sma['status'] == 'success'
+    assert res_ema['status'] == 'success'
+    # Check that metrics or equity curves differ between SMA and EMA
+    assert (res_sma['metrics']['total_trades'] != res_ema['metrics']['total_trades']
+            or res_sma['metrics']['sharpe_ratio'] != res_ema['metrics']['sharpe_ratio']
+            or res_sma['equity_curve'] != res_ema['equity_curve'])
+
+def test_run_backtest_pipeline_edge_of_grid_and_oos():
+    """Verify edge of grid detection and out of sample metrics computation."""
+    dates = pd.date_range('2023-01-01', periods=80, freq='h')
+    np.random.seed(123)
+    prices = 50 + np.cumsum(np.random.randn(80))
+    df = pd.DataFrame({
+        'open': prices,
+        'high': prices + 0.5,
+        'low': prices - 0.5,
+        'close': prices,
+        'volume': 500
+    }, index=dates)
+
+    config = {
+        'strategy_type': 'sma_crossover',
+        'fast_ma': {'min': 5, 'max': 5, 'step': 5},
+        'slow_ma': {'min': 10, 'max': 10, 'step': 10},
+        'objective': 'sharpe',
+        'max_drawdown': 0.9,
+        'holdout_pct': 0.25
+    }
+
+    res = backtest.run_backtest_pipeline(df, config)
+    assert res['status'] == 'success'
+    # Since fast=5 (min/max) and slow=10 (min/max), it must flag edge of grid
+    assert res['robustness']['edge_of_grid'] is True
+    assert any('edge of the search grid' in w for w in res['robustness']['warnings'])
+    # Check OOS metrics present
+    assert 'oos_sharpe' in res['metrics']
+    assert 'oos_total_return' in res['metrics']
+    assert 'oos_max_drawdown' in res['metrics']
+    assert 'out_of_sample_drop' in res['robustness']

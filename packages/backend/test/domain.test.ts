@@ -53,7 +53,7 @@ test('parses CSV metadata and rejects duplicate timestamps', () => {
   );
   assert.throws(
     () => parseCsvMetadata('timestamp,open\nt,1'),
-    /missing required columns/
+    /missing required OHLCV columns/i
   );
 });
 
@@ -114,3 +114,38 @@ test('local assistant parser extracts strategy, dataset, objective and drawdown'
   assert.equal(parsed.max_drawdown_limit, 0.1);
   assert.ok(parsed.estimated_combinations > 0);
 });
+
+test('validates profile schemas and enforces parameter bounds', async () => {
+  const { createProfileSchema, updateProfileSchema } = await import('@optitrader/shared');
+
+
+  const valid = createProfileSchema.safeParse({
+    name: 'Valid Momentum Profile',
+    strategy_type: 'sma_crossover',
+    objective: 'sharpe',
+    max_drawdown_limit: 0.15,
+    params: {
+      fast_ma: { min: 5, max: 20, step: 5 },
+      slow_ma: { min: 25, max: 100, step: 10 },
+    },
+  });
+  assert.equal(valid.success, true);
+
+  const invalid = createProfileSchema.safeParse({
+    name: 'Overlapping MA Profile',
+    strategy_type: 'sma_crossover',
+    objective: 'sharpe',
+    max_drawdown_limit: 0.15,
+    params: {
+      fast_ma: { min: 5, max: 35, step: 5 },
+      slow_ma: { min: 25, max: 100, step: 10 },
+    },
+  });
+  assert.equal(invalid.success, false);
+
+  const validPartialUpdate = updateProfileSchema.safeParse({
+    name: 'Updated Name Only',
+  });
+  assert.equal(validPartialUpdate.success, true);
+});
+

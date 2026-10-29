@@ -3,7 +3,8 @@ import Alert from 'react-bootstrap/Alert';
 import Button from 'react-bootstrap/Button';
 import { Outlet, useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
-import { getApiModeLabel } from '../api/index';
+import { apiMode, getApiModeLabel } from '../api/index';
+
 import { useApp } from '../context/AppContext';
 import Sidebar from './Sidebar';
 
@@ -75,14 +76,25 @@ export default function AppLayout() {
 
           <div className="topbar-actions">
             <span className="api-pill">{getApiModeLabel()}</span>
-            <Button variant="outline-secondary" size="sm" onClick={() => { void handleReset(); }}>
-              Reset demo
+            {apiMode === 'mock' && (
+              <Button variant="outline-secondary" size="sm" onClick={() => { void handleReset(); }}>
+                Reset demo
+              </Button>
+            )}
+            <Button
+              variant="link"
+              className="user-avatar text-decoration-none"
+              title={`${user?.email || 'Demo user'} (Click for Account Settings)`}
+              onClick={() => navigate('/account')}
+            >
+              {initials}
             </Button>
-            <div className="user-avatar" title={user?.email || 'Demo user'}>{initials}</div>
             <Button variant="outline-secondary" size="sm" onClick={() => { void handleLogout(); }}>
               Sign out
             </Button>
           </div>
+
+
         </header>
 
         <main className="app-main">

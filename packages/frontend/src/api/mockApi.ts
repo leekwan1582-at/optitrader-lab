@@ -1,21 +1,31 @@
 import { ApiError } from './client';
 import rawSeed from '../data/mockData.json';
 import type {
+  ChangePasswordInput,
   CreateProfileInput,
   Dataset,
-  ErrorLog,
+  DatasetPreviewResponse,
+  ErrorLogQuery,
   LoginInput,
   MockData,
+  PaginatedErrorLogsResponse,
+  PaginatedRunsResponse,
   ParameterRange,
   ParsedConfig,
   Profile,
+  RegisterInput,
   Run,
   RunConfig,
+  RunFilterQuery,
+  RunLogsResponse,
   Session,
+  UpdateAccountInput,
+  UpdateProfileInput,
   User,
   UploadDataset,
   WorkspaceBootstrap,
 } from '../types/domain';
+
 
 const MAX_TRIALS = 500;
 const seedData = rawSeed as unknown as MockData;
@@ -157,7 +167,46 @@ export async function login({ email, password }: LoginInput): Promise<Session> {
   return { user: currentMockUser };
 }
 
+export async function register({ name, email, workspaceName }: RegisterInput): Promise<Session> {
+  await delay(450);
+  const store = readStore();
+  const ownerName = name || 'Marcus Lim';
+  const wsName = workspaceName || `${ownerName.replace(/\s+/g, '_')}_Research`;
+  store.workspace.owner = ownerName;
+  store.workspace.name = wsName;
+  currentMockUser = {
+    id: 'mock-user',
+    email,
+    name: ownerName,
+    workspaceName: wsName,
+    workspace: store.workspace,
+  };
+  return { user: currentMockUser };
+}
+
+export async function changePassword(_input: ChangePasswordInput): Promise<User> {
+  await delay(300);
+  if (!currentMockUser) throw new ApiError('Not authenticated', 401);
+  return currentMockUser;
+}
+
+export async function updateAccount(input: UpdateAccountInput): Promise<User> {
+  await delay(300);
+  if (!currentMockUser) throw new ApiError('Not authenticated', 401);
+  const store = readStore();
+  if (input.name) {
+    currentMockUser.name = input.name;
+    store.workspace.owner = input.name;
+  }
+  if (input.workspaceName) {
+    currentMockUser.workspaceName = input.workspaceName;
+    store.workspace.name = input.workspaceName;
+  }
+  return currentMockUser;
+}
+
 export async function getMe(): Promise<User> {
+
   await delay(150);
   if (!currentMockUser) {
     throw new ApiError('Not authenticated.', 401);
@@ -183,28 +232,68 @@ export async function getDatasets(): Promise<Dataset[]> {
   return readStore().datasets;
 }
 
-export async function uploadDataset({
-  name,
-  symbol,
-  timeframe,
-  dateRange,
-  rows,
-}: UploadDataset): Promise<Dataset> {
-  await delay(500);
+export async function uploadDataset(
+  input: UploadDataset | FormData,
+  onProgress?: (percent: number) => void
+): Promise<Dataset> {
+  await delay(300);
+  if (onProgress) {
+    onProgress(50);
+    await delay(200);
+    onProgress(100);
+  }
+
+  let name = 'Uploaded dataset';
+  let symbol = 'UNKNOWN';
+  let timeframe = '1H';
+  let dateRange = '2023-01-01 to 2023-12-31';
+  let rows = 500;
+
+  if (input instanceof FormData) {
+    name = (input.get('name') as string) || name;
+    symbol = (input.get('symbol') as string) || symbol;
+    timeframe = (input.get('timeframe') as string) || timeframe;
+  } else {
+    name = input.name || name;
+    symbol = input.symbol || symbol;
+    timeframe = input.timeframe || timeframe;
+    dateRange = input.dateRange || dateRange;
+    rows = Number(input.rows) || rows;
+  }
+
   return updateStore((store) => {
     const dataset: Dataset = {
       dataset_id: createId('ds'),
       owner: store.workspace.workspace_id,
-      name: name || 'Uploaded dataset',
-      symbol: symbol || 'UNKNOWN',
-      timeframe: timeframe || '1H',
-      date_range: dateRange || '—',
-      rows: Number(rows) || 0,
+      name,
+      symbol,
+      timeframe,
+      date_range: dateRange,
+      rows,
       status: 'validated',
     };
     store.datasets.unshift(dataset);
     return dataset;
   });
+}
+
+export async function getDatasetPreview(datasetId: string): Promise<DatasetPreviewResponse> {
+  await delay(150);
+  const store = readStore();
+  const dataset = store.datasets.find((d) => d.dataset_id === datasetId);
+  return {
+    dataset_id: datasetId,
+    name: dataset?.name || 'Dataset Preview',
+    symbol: dataset?.symbol || 'UNKNOWN',
+    timeframe: dataset?.timeframe || '1H',
+    total_rows: dataset?.rows || 10,
+    columns: ['timestamp', 'open', 'high', 'low', 'close', 'volume'],
+    preview_rows: [
+      { timestamp: '2023-01-01T00:00:00Z', open: 100.5, high: 102.0, low: 99.8, close: 101.2, volume: 1500 },
+      { timestamp: '2023-01-01T01:00:00Z', open: 101.2, high: 103.4, low: 101.0, close: 102.8, volume: 2100 },
+      { timestamp: '2023-01-01T02:00:00Z', open: 102.8, high: 104.0, low: 102.1, close: 103.5, volume: 1800 },
+    ],
+  };
 }
 
 export async function deleteDataset(datasetId: string): Promise<void> {
@@ -236,10 +325,70 @@ export async function createProfile(profile: CreateProfileInput): Promise<Profil
   });
 }
 
-export async function getRuns(): Promise<Run[]> {
+export async function updateProfile(profileId: string, profile: UpdateProfileInput): Promise<Profile> {
+  await delay(300);
+  return updateStore((store) => {
+    const existing = store.profiles.find((p) => p.profile_id === profileId);
+    if (!existing) throw new ApiError('Profile not found', 404);
+    if (profile.name) existing.name = profile.name;
+    if (profile.strategy_type) existing.strategy_type = profile.strategy_type;
+    if (profile.objective) existing.objective = profile.objective;
+    if (profile.max_drawdown_limit) existing.max_drawdown_limit = Number(profile.max_drawdown_limit);
+    if (profile.params) existing.params = profile.params;
+    return existing;
+  });
+}
+
+export async function cloneProfile(profileId: string): Promise<Profile> {
+  await delay(300);
+  return updateStore((store) => {
+    const existing = store.profiles.find((p) => p.profile_id === profileId);
+    if (!existing) throw new ApiError('Profile not found', 404);
+    const cloned: Profile = {
+      ...clone(existing),
+      profile_id: createId('profile'),
+      name: `Copy of ${existing.name}`,
+    };
+    store.profiles.unshift(cloned);
+    return cloned;
+  });
+}
+
+export async function deleteProfile(profileId: string): Promise<void> {
+  await delay(300);
+  updateStore((store) => {
+    store.profiles = store.profiles.filter((p) => p.profile_id !== profileId);
+  });
+}
+
+
+export async function getRuns(filter?: RunFilterQuery): Promise<PaginatedRunsResponse> {
   await delay(200);
   const store = readStore();
-  return store.runs.map((run) => decorateRun(run, store));
+  let items = store.runs.map((run) => decorateRun(run, store));
+
+  if (filter?.status) {
+    items = items.filter((r) => r.status === filter.status);
+  }
+  if (filter?.dataset_id) {
+    items = items.filter((r) => r.dataset_id === filter.dataset_id);
+  }
+  if (filter?.strategy_type) {
+    items = items.filter((r) => r.strategy_type === filter.strategy_type);
+  }
+
+  const page = filter?.page || 1;
+  const limit = filter?.limit || 20;
+  const total = items.length;
+  const paginated = items.slice((page - 1) * limit, page * limit);
+
+  return {
+    items: paginated,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+  };
 }
 
 export async function getRun(runId: string): Promise<Run> {
@@ -251,9 +400,62 @@ export async function getRun(runId: string): Promise<Run> {
   return decorateRun(run, store);
 }
 
-export async function getErrorLogs(): Promise<ErrorLog[]> {
+export async function getRunLogs(runId: string): Promise<RunLogsResponse> {
   await delay(150);
-  return readStore().error_logs;
+  const run = await getRun(runId);
+  return {
+    run_id: runId,
+    status: run.status,
+    logs: [
+      { timestamp: new Date(Date.now() - 60000), level: 'info', message: 'Optimization worker initialized.' },
+      { timestamp: new Date(Date.now() - 45000), level: 'info', message: `Evaluating ${run.trials || 54} combinations.` },
+      { timestamp: new Date(Date.now() - 30000), level: 'info', message: 'In-sample optimization complete.' },
+      { timestamp: new Date(Date.now() - 15000), level: 'info', message: 'Out-of-sample forward evaluation verified.' },
+    ],
+  };
+}
+
+export async function cancelRun(runId: string): Promise<Run> {
+  await delay(250);
+  return updateStore((store) => {
+    const run = store.runs.find((r) => r.run_id === runId);
+    if (!run) throw new ApiError('Run not found', 404);
+    run.status = 'cancelled';
+    run.error_code = 'RUN_CANCELLED';
+    run.error_message = 'Optimization was cancelled.';
+    return decorateRun(run, store);
+  });
+}
+
+export async function retryRun(runId: string): Promise<Run> {
+  await delay(300);
+  const original = await getRun(runId);
+  if (!original.config) throw new ApiError('Missing run configuration', 422);
+  return launchRun(original.config);
+}
+
+export async function getErrorLogs(filter?: ErrorLogQuery): Promise<PaginatedErrorLogsResponse> {
+  await delay(150);
+  let items = readStore().error_logs;
+  if (filter?.severity) {
+    items = items.filter((log) => log.severity === filter.severity);
+  }
+  if (filter?.experiment_id) {
+    items = items.filter((log) => log.experiment_id === filter.experiment_id);
+  }
+
+  const page = filter?.page || 1;
+  const limit = filter?.limit || 50;
+  const total = items.length;
+  const paginated = items.slice((page - 1) * limit, page * limit);
+
+  return {
+    items: paginated,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+  };
 }
 
 export async function parsePrompt(prompt: string, datasets: Dataset[] = []): Promise<ParsedConfig> {

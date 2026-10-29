@@ -20,12 +20,15 @@ export default defineConfig([
     "**/build/**",
     "**/coverage/**",
     "**/node_modules/**",
+    "**/.venv/**",
+    "packages/backend/engine/.venv/**",
     ".venv/**",
     ".archieve/**",
     "prototypes/**",
     "docs/**",
     "**/*.fixture.ts",
   ]),
+
 
   // Applies to every package.
   {

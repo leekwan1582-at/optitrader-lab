@@ -8,10 +8,12 @@ interface SidebarProps {
 const links = [
   { to: '/', label: 'Dashboard', icon: '01', end: true },
   { to: '/experiments/new', label: 'New Experiment', icon: '02' },
-  { to: '/datasets', label: 'Datasets', icon: '03' },
-  { to: '/results', label: 'Results', icon: '04' },
-  { to: '/comparison', label: 'Comparison', icon: '05' },
+  { to: '/profiles', label: 'Profiles', icon: '03' },
+  { to: '/datasets', label: 'Datasets', icon: '04' },
+  { to: '/results', label: 'Results', icon: '05' },
+  { to: '/comparison', label: 'Comparison', icon: '06' },
 ];
+
 
 export default function Sidebar({ open, onNavigate }: SidebarProps) {
   return (

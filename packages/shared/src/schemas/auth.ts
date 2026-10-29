@@ -36,8 +36,28 @@ export const jwtPayloadSchema = z.object({
   exp: z.number().optional(),
 });
 
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required.'),
+  newPassword: z.string().min(8, 'New password must be at least 8 characters.').max(128),
+  confirmNewPassword: z.string().min(1, 'Please confirm your new password.'),
+}).refine((data) => data.newPassword === data.confirmNewPassword, {
+  message: 'Passwords do not match.',
+  path: ['confirmNewPassword'],
+}).refine((data) => data.currentPassword !== data.newPassword, {
+  message: 'New password must be different from current password.',
+  path: ['newPassword'],
+});
+
+export const updateAccountSchema = z.object({
+  name: z.string().trim().min(2).max(80).optional(),
+  workspaceName: z.string().trim().min(2).max(80).optional(),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+export type UpdateAccountInput = z.infer<typeof updateAccountSchema>;
 export type User = z.infer<typeof userSchema>;
 export type Session = z.infer<typeof sessionSchema>;
 export type JwtPayload = z.infer<typeof jwtPayloadSchema>;
+

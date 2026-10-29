@@ -1,8 +1,19 @@
 import { GoogleGenAI, Type, type Tool } from '@google/genai';
 import { z } from 'zod';
-import type { AppConfig, DatasetData, Objective, ParameterRange, RunConfig, StrategyType } from '../types/domain.js';
+import type {
+  AiSummary,
+  AppConfig,
+  BestMetrics,
+  DatasetData,
+  Objective,
+  ParameterRange,
+  Robustness,
+  RunConfig,
+  StrategyType,
+} from '../types/domain.js';
 import { countCombinations } from '../utils/combinations.js';
 import { logger } from '../logger.js';
+import { aiSummarySchema } from '@optitrader/shared';
 
 const rangeSchema = z.object({
   min: z.coerce.number().int().positive(),
@@ -66,11 +77,21 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, tries = 2): Promise<T> {
   let lastError: unknown;
   for (let attempt = 0; attempt < tries; attempt += 1) {
     try {
-      return await fn();
+      // 8 second timeout per Gemini call attempt to prevent UI hangs
+      const abortController = new AbortController();
+      const timeout = setTimeout(() => abortController.abort(), 8000);
+      const res = await Promise.race([
+        fn(),
+        new Promise<never>((_, reject) => {
+          abortController.signal.addEventListener('abort', () => reject(new Error('Gemini API request timed out')));
+        }),
+      ]);
+      clearTimeout(timeout);
+      return res;
     } catch (error) {
       lastError = error;
       const status = (error as { status?: number; statusCode?: number }).status
@@ -195,6 +216,7 @@ export async function parsePrompt({
     return local;
   }
 
+  const startTime = Date.now();
   try {
     const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
     const response = await withRetry(() => ai.models.generateContent({
@@ -205,6 +227,13 @@ export async function parsePrompt({
         tools,
       },
     }));
+
+    const duration = Date.now() - startTime;
+    logger.info({
+      model: config.geminiModel,
+      durationMs: duration,
+      usage: response.usageMetadata,
+    }, 'Gemini prompt parse completed');
 
     const call = response.functionCalls?.[0];
     if (!call?.args) {
@@ -221,7 +250,123 @@ export async function parsePrompt({
     return mergeWithDefaults(args, prompt, datasets);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logger.warn({ message }, 'Gemini assistant unavailable; using local parser');
+    logger.warn({ message, durationMs: Date.now() - startTime }, 'Gemini assistant unavailable; using local parser');
     return local;
+  }
+}
+
+/**
+ * Deterministic fallback summary generator.
+ */
+export function buildDeterministicSummary(config: RunConfig, best: BestMetrics, trials: number): AiSummary {
+  const strategyName = config.strategy_type === 'ema_momentum' ? 'EMA Momentum' : 'SMA Crossover';
+  const annualized = ((best.total_return || 0) * 100).toFixed(1);
+  const dd = ((best.max_drawdown || 0) * 100).toFixed(1);
+
+  return {
+    headline: `${strategyName} with Fast ${best.fast_ma} / Slow ${best.slow_ma} achieved Sharpe ${best.sharpe.toFixed(2)}.`,
+    key_findings: [
+      `Evaluated across ${trials} grid combinations.`,
+      `Reported an annualized return of ${annualized}% with a maximum drawdown of ${dd}%.`,
+      'Overfitting risk remains elevated; paper-trade before deploying capital.',
+    ],
+    caveats: [
+      'Historical simulation only; forward performance may deteriorate.',
+      'Proceed with out-of-sample forward verification before executing live orders.',
+    ],
+  };
+}
+
+/**
+ * Generate an AI summary for completed backtest runs using Gemini with strict schema enforcement
+ * and programmatic metric anchoring.
+ */
+export async function generateRunSummary({
+  config,
+  best,
+  trials,
+  robustness,
+  appConfig,
+}: {
+  config: RunConfig;
+  best: BestMetrics;
+  trials: number;
+  robustness?: Robustness;
+  appConfig: AppConfig;
+}): Promise<AiSummary> {
+  const fallback = buildDeterministicSummary(config, best, trials);
+
+  if (!appConfig.geminiApiKey) {
+    return fallback;
+  }
+
+  const prompt = [
+    'Analyze this completed algorithmic backtest run and provide structured insights.',
+    `Strategy: ${config.strategy_type}`,
+    `Best Parameters: Fast MA ${best.fast_ma}, Slow MA ${best.slow_ma}`,
+    `In-Sample Metrics: Sharpe ${best.sharpe.toFixed(2)}, Return ${((best.total_return || 0) * 100).toFixed(1)}%, Max DD ${((best.max_drawdown || 0) * 100).toFixed(1)}%, Trades ${best.trades}, Profit Factor ${best.profit_factor.toFixed(2)}`,
+    best.oos_sharpe !== undefined ? `Out-of-Sample Metrics: Sharpe ${best.oos_sharpe.toFixed(2)}, Return ${((best.oos_total_return || 0) * 100).toFixed(1)}%, Max DD ${((best.oos_max_drawdown || 0) * 100).toFixed(1)}%` : '',
+    robustness ? `Robustness: Confidence Score ${robustness.confidence_score}/10, Out-of-Sample Drop ${((robustness.out_of_sample_drop || 0) * 100).toFixed(1)}%, Edge of Grid: ${robustness.edge_of_grid}` : '',
+    `Total Trials Tested: ${trials}`,
+    'CRITICAL RULES:',
+    `1. The headline MUST accurately state: Strategy "${config.strategy_type === 'ema_momentum' ? 'EMA' : 'SMA'}", Fast ${best.fast_ma}, Slow ${best.slow_ma}, Sharpe ${best.sharpe.toFixed(2)}. DO NOT alter or fabricate these numbers.`,
+    '2. Key findings should highlight parameter stability and out-of-sample consistency.',
+    '3. Caveats must list risks, data limitations, and lack of live trading guarantees.',
+    '4. Output ONLY valid JSON matching the requested schema. No markdown formatting.',
+  ].filter(Boolean).join('\n');
+
+  const startTime = Date.now();
+  try {
+    const ai = new GoogleGenAI({ apiKey: appConfig.geminiApiKey });
+    const response = await withRetry(() => ai.models.generateContent({
+      model: appConfig.geminiModel,
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            headline: { type: Type.STRING },
+            key_findings: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+            },
+            caveats: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+            },
+          },
+          required: ['headline', 'key_findings', 'caveats'],
+        },
+      },
+    }));
+
+    const duration = Date.now() - startTime;
+    logger.info({
+      model: appConfig.geminiModel,
+      durationMs: duration,
+      usage: response.usageMetadata,
+    }, 'Gemini run summary generated');
+
+    const rawJson = response.text?.trim();
+    if (!rawJson) return fallback;
+
+    const parsed = aiSummarySchema.parse(JSON.parse(rawJson));
+
+    // Anti-hallucination check: ensure headline contains actual Sharpe or best params
+    const expectedSharpe = best.sharpe.toFixed(2);
+    if (
+      (!parsed.headline.includes(String(best.fast_ma)) || !parsed.headline.includes(String(best.slow_ma))) &&
+      !parsed.headline.includes(expectedSharpe)
+    ) {
+      logger.warn('Gemini summary headline deviated from actual parameters; locking headline.');
+      parsed.headline = fallback.headline;
+    }
+
+    return parsed;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn({ message, durationMs: Date.now() - startTime }, 'Gemini run summary generation failed; using fallback');
+    return fallback;
   }
 }

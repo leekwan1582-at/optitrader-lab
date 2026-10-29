@@ -1,95 +1,87 @@
 import { useRef, useState, type DragEvent } from 'react';
+import Alert from 'react-bootstrap/Alert';
 import Button from 'react-bootstrap/Button';
 import Col from 'react-bootstrap/Col';
+import Modal from 'react-bootstrap/Modal';
+import ProgressBar from 'react-bootstrap/ProgressBar';
 import Row from 'react-bootstrap/Row';
+import Table from 'react-bootstrap/Table';
 import Swal from 'sweetalert2';
 import DataTable, { type DataTableColumn } from '../components/DataTable';
 import PageHeader from '../components/PageHeader';
 import { useApp } from '../context/AppContext';
+import { api } from '../api/index';
+import { ApiError } from '../api/client';
 import { formatInteger } from '../utils/format';
-import type { Dataset, UploadDataset } from '../types/domain';
-
-const REQUIRED_COLUMNS = ['timestamp', 'open', 'high', 'low', 'close', 'volume'];
-
-function parseCsvMetadata(file: File, text: string): UploadDataset & { rows: number } {
-  const lines = text.trim().split(/\r?\n/).filter(Boolean);
-  if (!lines.length) {
-    throw new Error('The CSV is empty.');
-  }
-
-  const headerLine = lines[0];
-  if (!headerLine) {
-    throw new Error('The CSV is empty.');
-  }
-  const headers = headerLine.split(',').map((header) => header.trim().toLowerCase());
-  const missing = REQUIRED_COLUMNS.filter((column) => !headers.includes(column));
-  if (missing.length) {
-    throw new Error(`Missing required columns: ${missing.join(', ')}.`);
-  }
-
-  const firstTimestamp = lines[1]?.split(',')[0]?.trim();
-  const lastTimestamp = lines[lines.length - 1]?.split(',')[0]?.trim();
-
-  const seenTimestamps = new Set();
-  for (let index = 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (!line) continue;
-    const timestamp = line.split(',')[0]?.trim();
-    if (!timestamp) continue;
-    if (seenTimestamps.has(timestamp)) {
-      throw new Error(`Duplicate timestamp on row ${index + 1}: ${timestamp}`);
-    }
-    seenTimestamps.add(timestamp);
-  }
-
-  const firstDate = firstTimestamp ? new Date(firstTimestamp) : null;
-  const lastDate = lastTimestamp ? new Date(lastTimestamp) : null;
-
-  const baseName = file.name.replace(/\.csv$/i, '');
-  const parts = baseName.toUpperCase().split(/[_\-\s]+/).filter(Boolean);
-  const symbol = parts[0] || 'UNKNOWN';
-  const timeframe = parts.slice(1).join('') || '1H';
-
-  const dateRange = firstDate && lastDate && !Number.isNaN(firstDate.valueOf()) && !Number.isNaN(lastDate.valueOf())
-    ? `${firstDate.toISOString().slice(0, 10)} to ${lastDate.toISOString().slice(0, 10)}`
-    : '—';
-
-  return {
-    name: baseName,
-    symbol,
-    timeframe,
-    dateRange,
-    rows: lines.length - 1,
-  };
-}
+import type { Dataset, DatasetPreviewResponse } from '../types/domain';
 
 export default function DatasetsPage() {
   const { datasets, uploadDataset, removeDataset } = useApp();
   const [busy, setBusy] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState<{ message: string; code?: string } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [lastUploadedFile, setLastUploadedFile] = useState<File | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Preview state
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewData, setPreviewData] = useState<DatasetPreviewResponse | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   async function handleFile(file?: File): Promise<void> {
     if (!file) return;
     if (!/\.csv$/i.test(file.name)) {
-      Swal.fire({ icon: 'error', title: 'Unsupported file', text: 'Upload an OHLCV .csv file.' });
+      setUploadError({
+        message: 'Unsupported file format. Please upload an OHLCV .csv file.',
+        code: 'INVALID_FILE_TYPE',
+      });
       return;
     }
 
+    setLastUploadedFile(file);
+    setUploadError(null);
     setBusy(true);
+    setUploadProgress(0);
+
+    const baseName = file.name.replace(/\.csv$/i, '');
+    const parts = baseName.toUpperCase().split(/[_\-\s]+/).filter(Boolean);
+    const symbol = parts[0] || 'UNKNOWN';
+    const timeframe = parts.slice(1).join('') || '1H';
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('name', baseName);
+    formData.append('symbol', symbol);
+    formData.append('timeframe', timeframe);
+
     try {
-      const text = await file.text();
-      const metadata = parseCsvMetadata(file, text);
-      await uploadDataset({ ...metadata, csvText: text });
+      const created = await uploadDataset(formData, (percent) => {
+        setUploadProgress(percent);
+      });
+
+      setUploadProgress(null);
       await Swal.fire({
         icon: 'success',
-        title: 'Dataset validated',
-        text: `${metadata.name} · ${metadata.rows.toLocaleString()} rows imported.`,
-        timer: 1600,
+        title: 'Dataset uploaded & validated',
+        text: `${created.name} (${created.symbol}) · ${created.rows.toLocaleString()} rows verified.`,
+        timer: 1800,
         showConfirmButton: false,
       });
     } catch (error) {
-      Swal.fire({ icon: 'error', title: 'Upload failed', text: error instanceof Error ? error.message : 'Upload failed.' });
+      setUploadProgress(null);
+      let message = 'Upload failed. Please check the CSV file formatting and try again.';
+      let code: string | undefined;
+
+      if (error instanceof ApiError) {
+        message = error.message;
+        code = error.code;
+      } else if (error instanceof Error) {
+        message = error.message;
+      }
+
+      setUploadError({ message, code });
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = '';
@@ -100,14 +92,40 @@ export default function DatasetsPage() {
     const result = await Swal.fire({
       icon: 'warning',
       title: `Delete ${dataset.name}?`,
-      text: 'Runs that reference this dataset remain in the experiment log.',
+      text: 'Datasets referenced by active or completed runs cannot be deleted.',
       showCancelButton: true,
       confirmButtonText: 'Delete',
       confirmButtonColor: '#ff5d5d',
     });
     if (!result.isConfirmed) return;
-    await removeDataset(dataset.dataset_id);
-    Swal.fire({ icon: 'success', title: 'Dataset removed', timer: 1200, showConfirmButton: false });
+
+    try {
+      await removeDataset(dataset.dataset_id);
+      Swal.fire({ icon: 'success', title: 'Dataset removed', timer: 1200, showConfirmButton: false });
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Failed to delete dataset.';
+      Swal.fire({
+        icon: 'error',
+        title: 'Deletion blocked',
+        text: message,
+      });
+    }
+  }
+
+  async function handleOpenPreview(dataset: Dataset): Promise<void> {
+    setPreviewOpen(true);
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreviewData(null);
+
+    try {
+      const data = await api.getDatasetPreview(dataset.dataset_id);
+      setPreviewData(data);
+    } catch (err) {
+      setPreviewError(err instanceof Error ? err.message : 'Failed to load preview.');
+    } finally {
+      setPreviewLoading(false);
+    }
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>): void {
@@ -138,12 +156,29 @@ export default function DatasetsPage() {
     },
     {
       key: 'actions',
-      label: '',
+      label: 'Actions',
       align: 'end',
       render: (dataset) => (
-        <Button variant="outline-danger" size="sm" onClick={() => handleDelete(dataset)}>
-          Delete
-        </Button>
+        <div className="d-flex justify-content-end gap-2">
+          <Button
+            variant="outline-info"
+            size="sm"
+            style={{ minHeight: '44px', minWidth: '44px' }}
+            onClick={() => void handleOpenPreview(dataset)}
+            aria-label={`Preview rows for ${dataset.name}`}
+          >
+            Preview
+          </Button>
+          <Button
+            variant="outline-danger"
+            size="sm"
+            style={{ minHeight: '44px', minWidth: '44px' }}
+            onClick={() => void handleDelete(dataset)}
+            aria-label={`Delete dataset ${dataset.name}`}
+          >
+            Delete
+          </Button>
+        </div>
       ),
     },
   ];
@@ -153,10 +188,15 @@ export default function DatasetsPage() {
       <PageHeader
         eyebrow="Data manager"
         title="Historical datasets"
-        subtitle="Upload OHLCV CSVs, validate required columns, and manage the datasets available to experiments."
+        subtitle="Upload OHLCV CSVs, validate schema and integrity, and inspect stored candles."
         actions={(
-          <Button className="btn-cyan" onClick={() => inputRef.current?.click()} disabled={busy}>
-            {busy ? 'Validating…' : 'Upload CSV'}
+          <Button
+            className="btn-cyan"
+            style={{ minHeight: '44px', minWidth: '44px' }}
+            onClick={() => inputRef.current?.click()}
+            disabled={busy}
+          >
+            {busy ? 'Processing…' : 'Upload CSV'}
           </Button>
         )}
       />
@@ -168,6 +208,39 @@ export default function DatasetsPage() {
         className="visually-hidden"
         onChange={(event) => void handleFile(event.target.files?.[0])}
       />
+
+      {uploadProgress !== null && (
+        <div className="mb-4">
+          <div className="d-flex justify-content-between small text-muted mb-1">
+            <span>Uploading dataset…</span>
+            <span>{uploadProgress}%</span>
+          </div>
+          <ProgressBar now={uploadProgress} animated={uploadProgress < 100} variant="info" />
+        </div>
+      )}
+
+      {uploadError && (
+        <div aria-live="polite" className="mb-4">
+          <Alert variant="danger" dismissible onClose={() => setUploadError(null)}>
+            <Alert.Heading className="h6 mb-1">Upload Validation Error</Alert.Heading>
+            <p className="mb-2">{uploadError.message}</p>
+            {uploadError.code && (
+              <p className="small mono text-danger-emphasis mb-2">Error code: {uploadError.code}</p>
+            )}
+            {lastUploadedFile && (
+              <Button
+                variant="outline-danger"
+                size="sm"
+                style={{ minHeight: '44px', minWidth: '44px' }}
+                onClick={() => void handleFile(lastUploadedFile)}
+                disabled={busy}
+              >
+                Retry Upload
+              </Button>
+            )}
+          </Alert>
+        </div>
+      )}
 
       <Row className="g-3 mb-4">
         <Col xs={12} lg={8}>
@@ -197,11 +270,11 @@ export default function DatasetsPage() {
           <div className="panel p-4 h-100">
             <div className="panel-eyebrow mb-3">Validation checklist</div>
             <ul className="check-list">
-              <li>Timestamp column parses as a date</li>
-              <li>OHLC columns are present</li>
-              <li>Duplicate timestamps are rejected by the API</li>
-              <li>Rows are counted before upload</li>
-              <li>Metadata is stored with the dataset record</li>
+              <li>Header row includes required OHLCV columns</li>
+              <li>Timestamps are strictly chronological with zero duplicates</li>
+              <li>Prices and volume are strictly valid positive numbers</li>
+              <li>Files stored in isolated owner storage</li>
+              <li>Referential integrity protects active experiment runs</li>
             </ul>
           </div>
         </Col>
@@ -221,6 +294,75 @@ export default function DatasetsPage() {
           emptyMessage="No datasets yet. Upload an OHLCV CSV to begin."
         />
       </div>
+
+      {/* Dataset Preview Modal */}
+      <Modal
+        show={previewOpen}
+        onHide={() => setPreviewOpen(false)}
+        size="lg"
+        centered
+        aria-labelledby="dataset-preview-title"
+      >
+        <Modal.Header closeButton>
+          <Modal.Title id="dataset-preview-title">
+            {previewData ? `${previewData.name} — First 10 Rows` : 'Dataset Preview'}
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {previewLoading && (
+            <div className="text-center py-4 text-muted">
+              Loading preview data…
+            </div>
+          )}
+
+          {previewError && (
+            <Alert variant="danger">
+              {previewError}
+            </Alert>
+          )}
+
+          {previewData && (
+            <div>
+              <div className="d-flex justify-content-between mb-3 text-muted small">
+                <span>Symbol: <strong>{previewData.symbol}</strong> ({previewData.timeframe})</span>
+                <span>Total rows: <strong>{previewData.total_rows.toLocaleString()}</strong></span>
+              </div>
+              <div className="table-responsive">
+                <Table striped bordered hover size="sm" className="mb-0">
+                  <thead>
+                    <tr>
+                      {previewData.columns.map((col) => (
+                        <th key={col} className="mono small">{col}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewData.preview_rows.map((row, idx) => (
+                      <tr key={idx}>
+                        <td className="mono small">{row.timestamp}</td>
+                        <td className="mono small text-end">{row.open}</td>
+                        <td className="mono small text-end">{row.high}</td>
+                        <td className="mono small text-end">{row.low}</td>
+                        <td className="mono small text-end">{row.close}</td>
+                        <td className="mono small text-end">{row.volume}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </div>
+            </div>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button
+            variant="secondary"
+            style={{ minHeight: '44px', minWidth: '44px' }}
+            onClick={() => setPreviewOpen(false)}
+          >
+            Close
+          </Button>
+        </Modal.Footer>
+      </Modal>
     </>
   );
 }

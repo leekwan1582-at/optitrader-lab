@@ -18,19 +18,9 @@ def safe_float(value: Any, fallback: float = 0.0) -> float:
         return fallback
     return number if math.isfinite(number) else fallback
 
+
 def parse_args(args: List[str]) -> Tuple[str, Dict[str, Any]]:
-    """
-    Parse arguments passed from the Node.js orchestrator.
-
-    Args:
-        args (List[str]): The command-line arguments (excluding script name).
-
-    Returns:
-        Tuple[str, Dict[str, Any]]: A tuple containing the CSV path and the config dictionary.
-
-    Raises:
-        SystemExit: If arguments are missing or JSON is invalid.
-    """
+    """Parse command line arguments."""
     if len(args) < 2:
         print(json.dumps({"error": "Missing arguments. Usage: python backtest.py <csv_path> '<json_config>'"}), file=sys.stderr)
         sys.exit(1)
@@ -44,25 +34,14 @@ def parse_args(args: List[str]) -> Tuple[str, Dict[str, Any]]:
         
     return csv_path, config
 
+
 def load_data(csv_path: str) -> pd.DataFrame:
-    """
-    Load and prepare the OHLCV data from a CSV file.
-
-    Args:
-        csv_path (str): Absolute path to the CSV file.
-
-    Returns:
-        pd.DataFrame: A DataFrame with a DatetimeIndex and OHLCV columns.
-
-    Raises:
-        SystemExit: If the file is missing, unreadable, or missing required columns.
-    """
+    """Load and prepare OHLCV data."""
     try:
         df = pd.read_csv(csv_path)
         
         if 'timestamp' in df.columns:
             df['timestamp'] = pd.to_datetime(df['timestamp'])
-            # FIXED: Removed inplace=True to avoid Pandas4Warning
             df = df.set_index('timestamp')
         elif not isinstance(df.index, pd.DatetimeIndex):
              raise ValueError("CSV must contain a 'timestamp' column or a DatetimeIndex.")
@@ -75,6 +54,7 @@ def load_data(csv_path: str) -> pd.DataFrame:
     except Exception as e:
         print(json.dumps({"error": f"Data loading failed: {str(e)}"}), file=sys.stderr)
         sys.exit(1)
+
 
 def infer_index_freq(index: pd.Index) -> Optional[Any]:
     """Infer a usable frequency for vectorbt annualization."""
@@ -95,22 +75,8 @@ def infer_index_freq(index: pd.Index) -> Optional[Any]:
     return median_delta
 
 
-def run_sma_crossover(df: pd.DataFrame, config: Dict[str, Any]) -> Tuple[vbt.Portfolio, np.ndarray, np.ndarray]:
-    """
-    Run SMA Crossover optimization using vectorbt.
-
-    Args:
-        df (pd.DataFrame): The historical data.
-        config (Dict[str, Any]): The optimization configuration.
-
-    Returns:
-        Tuple[vbt.Portfolio, np.ndarray, np.ndarray]: The portfolio matrix, fast windows, and slow windows.
-        
-    Raises:
-        ValueError: If no valid parameter combinations are found.
-    """
-    close = df['close']
-    
+def build_parameter_grid(config: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+    """Validate ranges and generate valid fast/slow parameter combinations."""
     try:
         fast_min = int(config['fast_ma']['min'])
         fast_max = int(config['fast_ma']['max'])
@@ -125,85 +91,205 @@ def run_sma_crossover(df: pd.DataFrame, config: Dict[str, Any]) -> Tuple[vbt.Por
     fast_windows = np.arange(fast_min, fast_max + 1, fast_step)
     slow_windows = np.arange(slow_min, slow_max + 1, slow_step)
     
-    # Ensure fast is always less than slow (filter invalid combos)
     combos = [(f, s) for f in fast_windows for s in slow_windows if f < s]
     if not combos:
         raise ValueError("No valid parameter combinations (Fast MA must be < Slow MA).")
         
-    fast_windows = np.array([c[0] for c in combos])
-    slow_windows = np.array([c[1] for c in combos])
-    
-    fast_ma = vbt.MA.run(close, window=fast_windows, short_name='fast')
-    slow_ma = vbt.MA.run(close, window=slow_windows, short_name='slow')
-    
+    grid_bounds = {
+        'fast_min': fast_min,
+        'fast_max': fast_max,
+        'slow_min': slow_min,
+        'slow_max': slow_max,
+    }
+    return np.array([c[0] for c in combos]), np.array([c[1] for c in combos]), grid_bounds
+
+
+def run_strategy_signals(
+    close: pd.Series,
+    fast_windows: np.ndarray,
+    slow_windows: np.ndarray,
+    strategy_type: str = 'sma_crossover'
+) -> Tuple[Any, Any]:
+    """
+    Compute entries and exits for SMA Crossover or EMA Momentum across the full series.
+    Indicators are generated over the full series to prevent cold-start distortion at split points.
+    """
+    if strategy_type == 'ema_momentum':
+        fast_ma = vbt.MA.run(close, window=fast_windows, ewm=True, short_name='fast_ema')
+        slow_ma = vbt.MA.run(close, window=slow_windows, ewm=True, short_name='slow_ema')
+    else:
+        fast_ma = vbt.MA.run(close, window=fast_windows, ewm=False, short_name='fast_sma')
+        slow_ma = vbt.MA.run(close, window=slow_windows, ewm=False, short_name='slow_sma')
+
     entries = fast_ma.ma_crossed_above(slow_ma)
     exits = fast_ma.ma_crossed_below(slow_ma)
-    
+    return entries, exits
+
+
+def run_backtest_pipeline(df: pd.DataFrame, config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Execute complete backtest pipeline:
+    1. Full series indicator generation.
+    2. Chronological In-Sample (train) vs Out-of-Sample (holdout) splitting.
+    3. Optimization strictly on In-Sample.
+    4. Winner evaluation on Out-of-Sample.
+    5. Robustness audits (edge-of-grid, OOS drop, sample sizes).
+    """
+    close = df['close']
+    total_bars = len(close)
+    if total_bars < 20:
+        raise ValueError(f"Insufficient data for backtesting: {total_bars} bars provided.")
+
+    fast_windows, slow_windows, grid_bounds = build_parameter_grid(config)
+    strategy_type = str(config.get('strategy_type', 'sma_crossover')).lower()
+
+    # Generate full-series signals
+    entries, exits = run_strategy_signals(close, fast_windows, slow_windows, strategy_type)
+
     fees = float(config.get('transaction_costs', 0.0))
     freq = infer_index_freq(close.index)
-    pf = vbt.Portfolio.from_signals(close, entries, exits, fees=fees, freq=freq)
-    
-    return pf, fast_windows, slow_windows
 
-def extract_results(pf: vbt.Portfolio, fast_windows: np.ndarray, slow_windows: np.ndarray, config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Extract metrics, find the best parameters, and format the equity curve.
+    # Train / Holdout split
+    raw_holdout = float(config.get('holdout_pct', 0.2))
+    holdout_pct = max(0.05, min(0.5, raw_holdout))
+    split_idx = int(total_bars * (1.0 - holdout_pct))
+    split_idx = max(10, min(total_bars - 5, split_idx))
 
-    Args:
-        pf (vbt.Portfolio): The generated portfolio matrix.
-        fast_windows (np.ndarray): Array of fast MA windows tested.
-        slow_windows (np.ndarray): Array of slow MA windows tested.
-        config (Dict[str, Any]): The optimization configuration.
+    # In-Sample slices
+    is_close = close.iloc[:split_idx]
+    is_entries = entries.iloc[:split_idx]
+    is_exits = exits.iloc[:split_idx]
 
-    Returns:
-        Dict[str, Any]: A dictionary formatted for the Node.js backend containing best params, metrics, and equity curve.
-    """
-    sharpe = pf.sharpe_ratio()
-    total_return = pf.total_return()
-    max_dd = pf.max_drawdown().abs()
-    win_rate = pf.trades.win_rate()
-    profit_factor = pf.trades.profit_factor()
-    total_trades = pf.trades.count()
-    
+    # Out-of-Sample slices
+    oos_close = close.iloc[split_idx:]
+    oos_entries = entries.iloc[split_idx:]
+    oos_exits = exits.iloc[split_idx:]
+
+    # Build In-Sample Portfolio Matrix
+    is_pf = vbt.Portfolio.from_signals(is_close, is_entries, is_exits, fees=fees, freq=freq)
+
+    # Compute In-Sample metrics
+    is_sharpe = is_pf.sharpe_ratio()
+    is_total_return = is_pf.total_return()
+    is_max_dd = np.abs(is_pf.max_drawdown())
+    is_win_rate = is_pf.trades.win_rate()
+    is_profit_factor = is_pf.trades.profit_factor()
+    is_total_trades = is_pf.trades.count()
+
+    # Compute Calmar ratio (annualized return / max drawdown)
+    try:
+        is_calmar = is_pf.calmar_ratio()
+    except Exception:
+        # Fallback approximation
+        if isinstance(is_max_dd, pd.Series):
+            is_calmar = is_total_return / is_max_dd.replace(0, np.nan)
+        else:
+            is_calmar = is_total_return / (is_max_dd if is_max_dd != 0 else np.nan)
+
+    # Convert to Series if single combination returned scalar
+    if not isinstance(is_sharpe, pd.Series):
+        is_sharpe = pd.Series([is_sharpe], index=[0])
+        is_total_return = pd.Series([is_total_return], index=[0])
+        is_max_dd = pd.Series([is_max_dd], index=[0])
+        is_calmar = pd.Series([is_calmar], index=[0])
+        is_win_rate = pd.Series([is_win_rate], index=[0])
+        is_profit_factor = pd.Series([is_profit_factor], index=[0])
+        is_total_trades = pd.Series([is_total_trades], index=[0])
+
     metrics_df = pd.DataFrame({
-        'sharpe': sharpe,
-        'total_return': total_return,
-        'max_drawdown': max_dd,
-        'win_rate': win_rate,
-        'profit_factor': profit_factor,
-        'total_trades': total_trades
+        'sharpe': is_sharpe,
+        'total_return': is_total_return,
+        'max_drawdown': is_max_dd,
+        'calmar': is_calmar,
+        'win_rate': is_win_rate,
+        'profit_factor': is_profit_factor,
+        'total_trades': is_total_trades,
     })
-    
+
     max_dd_cap = float(config.get('max_drawdown', 1.0))
     valid_combos = metrics_df[metrics_df['max_drawdown'] <= max_dd_cap]
-    
+
+    robustness_warnings: List[str] = []
+
     if valid_combos.empty:
         valid_combos = metrics_df
-        
+        robustness_warnings.append('0 parameter combinations met the max drawdown threshold; selected unconstrained winner.')
+
     objective = str(config.get('objective', 'sharpe')).lower()
     if objective == 'total_return':
-        best_idx = valid_combos['total_return'].idxmax()
+        target_col = 'total_return'
+    elif objective == 'calmar':
+        target_col = 'calmar'
     else:
-        best_idx = valid_combos['sharpe'].idxmax()
-        
-    best_pf = pf[best_idx] 
-    best_metrics = valid_combos.loc[best_idx]
-    
-    # Handle single vs multiple combinations indexing
-    if isinstance(best_idx, tuple):
-        # MultiIndex labels are (fast_window, slow_window), not positions.
-        best_fast = best_idx[0]
-        best_slow = best_idx[1]
-    else:
-        best_fast = fast_windows[best_idx]
-        best_slow = slow_windows[best_idx]
+        target_col = 'sharpe'
 
-    equity_curve = best_pf.value()
+    # Fill NaNs with -inf for selection
+    valid_series = valid_combos[target_col].replace([np.inf, -np.inf], np.nan).fillna(-999999.0)
+    best_idx = valid_series.idxmax()
+
+    best_metrics = valid_combos.loc[best_idx]
+
+    if isinstance(best_idx, tuple):
+        # MultiIndex names: ['fast_..._window', 'fast_..._ewm', 'slow_..._window', 'slow_..._ewm']
+        # The window levels are index 0 and index 2.
+        best_fast = int(best_idx[0])
+        best_slow = int(best_idx[2]) if len(best_idx) >= 3 else int(best_idx[1])
+    else:
+        best_fast = int(fast_windows[best_idx])
+        best_slow = int(slow_windows[best_idx])
+
+    # Edge of grid check
+    edge_of_grid = (
+        best_fast == grid_bounds['fast_min'] or
+        best_fast == grid_bounds['fast_max'] or
+        best_slow == grid_bounds['slow_min'] or
+        best_slow == grid_bounds['slow_max']
+    )
+    if edge_of_grid:
+        robustness_warnings.append('Best parameters hit the edge of the search grid; expand parameter bounds.')
+
+    # Sample size checks
+    if total_bars < 500:
+        robustness_warnings.append(f'Dataset has only {total_bars} bars; minimum 500 recommended for reliable statistical inference.')
+    is_trades_count = int(safe_float(best_metrics['total_trades']))
+    if is_trades_count < 30:
+        robustness_warnings.append(f'Winner produced only {is_trades_count} in-sample trades; minimum 30 recommended to prevent small-sample overfitting.')
+
+    # Evaluate Winner on Out-of-Sample
+    # When multiple combinations exist, entries/exits is a 2D DataFrame where columns are MultiIndex or single index.
+    # When only 1 combination exists, entries/exits is a 1D Series.
+    if isinstance(entries, pd.DataFrame):
+        oos_winner_entries = oos_entries[best_idx]
+        oos_winner_exits = oos_exits[best_idx]
+        full_winner_entries = entries[best_idx]
+        full_winner_exits = exits[best_idx]
+    else:
+        oos_winner_entries = oos_entries
+        oos_winner_exits = oos_exits
+        full_winner_entries = entries
+        full_winner_exits = exits
+
+    oos_pf = vbt.Portfolio.from_signals(oos_close, oos_winner_entries, oos_winner_exits, fees=fees, freq=freq)
+
+    oos_sharpe_val = safe_float(oos_pf.sharpe_ratio())
+    oos_total_return_val = safe_float(oos_pf.total_return())
+    oos_max_dd_val = safe_float(np.abs(oos_pf.max_drawdown()))
+
+    is_sharpe_val = safe_float(best_metrics['sharpe'])
+    if is_sharpe_val > 0.001:
+        oos_drop = (oos_sharpe_val - is_sharpe_val) / abs(is_sharpe_val)
+    else:
+        oos_drop = oos_sharpe_val - is_sharpe_val
+    oos_drop = round(float(oos_drop), 4)
+
+    # Full series portfolio of the winner for the equity curve
+    full_pf = vbt.Portfolio.from_signals(close, full_winner_entries, full_winner_exits, fees=fees, freq=freq)
+
+    equity_curve = full_pf.value()
     if isinstance(equity_curve.index, pd.DatetimeIndex):
         try:
             equity_curve = equity_curve.resample('W').last().dropna()
         except ValueError:
-            # Irregular or frequency-less timestamps cannot be resampled.
             step = max(1, len(equity_curve) // 30)
             equity_curve = equity_curve.iloc[::step]
     else:
@@ -224,19 +310,29 @@ def extract_results(pf: vbt.Portfolio, fast_windows: np.ndarray, slow_windows: n
     return {
         "status": "success",
         "best_params": {
-            "fast_ma": int(best_fast),
-            "slow_ma": int(best_slow)
+            "fast_ma": best_fast,
+            "slow_ma": best_slow,
         },
         "metrics": {
-            "sharpe_ratio": round(safe_float(best_metrics['sharpe']), 2),
+            "sharpe_ratio": round(is_sharpe_val, 2),
             "total_return": round(safe_float(best_metrics['total_return']) * 100, 2),
             "max_drawdown": round(abs(safe_float(best_metrics['max_drawdown'])) * 100, 2),
+            "calmar_ratio": round(safe_float(best_metrics['calmar']), 2),
             "win_rate": round(safe_float(best_metrics['win_rate']) * 100, 2),
             "profit_factor": round(safe_float(best_metrics['profit_factor']), 2),
-            "total_trades": int(safe_float(best_metrics['total_trades']))
+            "total_trades": is_trades_count,
+            "oos_sharpe": round(oos_sharpe_val, 2),
+            "oos_total_return": round(oos_total_return_val * 100, 2),
+            "oos_max_drawdown": round(oos_max_dd_val * 100, 2),
         },
-        "equity_curve": curve_data
+        "robustness": {
+            "edge_of_grid": edge_of_grid,
+            "out_of_sample_drop": oos_drop,
+            "warnings": robustness_warnings,
+        },
+        "equity_curve": curve_data,
     }
+
 
 def main() -> None:
     """Main execution entry point."""
@@ -244,12 +340,12 @@ def main() -> None:
     df = load_data(csv_path)
     
     try:
-        pf, fast_win, slow_win = run_sma_crossover(df, config)
-        results = extract_results(pf, fast_win, slow_win, config)
+        results = run_backtest_pipeline(df, config)
         print(json.dumps(results, allow_nan=False))
     except Exception as e:
         print(json.dumps({"error": str(e)}), file=sys.stderr)
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

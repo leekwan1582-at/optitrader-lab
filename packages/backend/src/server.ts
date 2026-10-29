@@ -5,6 +5,7 @@ import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import connectDB from './database.js';
 import { logger } from './logger.js';
+import { processRegistry } from './workers/processRegistry.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -19,6 +20,7 @@ async function main(): Promise<void> {
 
   async function shutdown(signal: string): Promise<void> {
     logger.info(`\n${signal} received; shutting down.`);
+    await processRegistry.shutdownAll();
     server.close(async () => {
       await mongoose.disconnect();
       process.exit(0);

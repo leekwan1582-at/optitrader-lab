@@ -46,6 +46,15 @@ export const errorHandler: ErrorRequestHandler = (error: ErrorWithDetails, _requ
     status = 503;
     code = 'DATABASE_UNAVAILABLE';
     message = 'The database is unavailable. Check that MongoDB is running.';
+  } else if (error.name === 'MulterError') {
+    status = 400;
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      status = 413;
+      code = 'FILE_TOO_LARGE';
+      message = 'Uploaded file exceeds the maximum allowed size.';
+    } else {
+      code = 'INVALID_FILE_UPLOAD';
+    }
   }
 
   if (status >= 500) {

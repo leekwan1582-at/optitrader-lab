@@ -7,7 +7,7 @@ const profileSchema = new Schema<ProfileData>(
   {
     _id: { type: String, required: true },        // profile_id
     owner: { type: String, required: true, index: true },
-    name: { type: String, required: true },
+    name: { type: String, required: true, trim: true },
     strategy_type: { type: String, required: true },
     objective: { type: String, required: true },
     max_drawdown_limit: { type: Number },
@@ -16,4 +16,7 @@ const profileSchema = new Schema<ProfileData>(
   { timestamps: true, _id: false, toJSON: { transform: (_doc, ret) => { (ret as Record<string, unknown>).profile_id = ret._id; return ret; } } }
 );
 
+profileSchema.index({ owner: 1, name: 1 }, { unique: true });
+
 export default mongoose.model<ProfileData>('Profile', profileSchema);
+

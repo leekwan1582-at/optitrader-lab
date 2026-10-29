@@ -142,3 +142,65 @@ export async function logoutUser(rawRefreshToken: string, config: AppConfig): Pr
 export async function revokeAllSessions(userId: string): Promise<void> {
   await revokeAllUserSessions(userId);
 }
+
+export async function changePassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+  config: AppConfig,
+  metadata: SessionMetadata = {}
+): Promise<AuthSessionResult> {
+  const userRecord = await UserModel.findById(userId);
+  if (!userRecord) {
+    throw new AppError('User not found.', 404, 'NOT_FOUND');
+  }
+
+  const matches = await bcrypt.compare(currentPassword, userRecord.passwordHash);
+  if (!matches) {
+    throw new AppError('Current password is incorrect.', 401, 'INVALID_CREDENTIALS');
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  userRecord.passwordHash = passwordHash;
+  await userRecord.save();
+
+  // Invalidate all prior sessions/devices
+  await revokeAllUserSessions(userId);
+
+  // Issue a fresh session for the current client
+  const user = await userWithWorkspace(userId);
+  const tokens = await createSession(user, config, metadata);
+
+  return { user, tokens };
+}
+
+export async function updateAccount(
+  userId: string,
+  updates: { name?: string; workspaceName?: string }
+): Promise<User> {
+  const userRecord = await UserModel.findById(userId);
+  if (!userRecord) {
+    throw new AppError('User not found.', 404, 'NOT_FOUND');
+  }
+
+  if (updates.name) {
+    userRecord.name = updates.name.trim();
+  }
+  if (updates.workspaceName) {
+    userRecord.workspaceName = updates.workspaceName.trim();
+  }
+  await userRecord.save();
+
+  if (updates.name || updates.workspaceName) {
+    await WorkspaceModel.findOneAndUpdate(
+      { user: userId },
+      {
+        ...(updates.name ? { owner: updates.name.trim() } : {}),
+        ...(updates.workspaceName ? { name: updates.workspaceName.trim() } : {}),
+      }
+    );
+  }
+
+  return userWithWorkspace(userId);
+}
+

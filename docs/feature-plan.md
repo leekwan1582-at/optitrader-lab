@@ -1,8 +1,8 @@
 # Feature Completion Plan
 
-**Status:** approved, implementation not started.
+**Status:** Completed and verified (Phases 0 through 6).
 
-This plan completes the remaining product features in `packages/` before the production queue, WebSocket progress and managed-deployment work.
+This plan details the full implementation roadmap across `packages/`, spanning Phase 0 (live mode default) through feature parity (Phases 1–5), quality and modern frontend architecture (Phase 6), and production deployment hardening with async queues and WebSockets (Phase 7).
 
 Related documents:
 
@@ -16,32 +16,33 @@ Related documents:
 | Decision | Choice |
 |---|---|
 | Mock mode | Development/demo only; live API is the production default |
-| Run execution | Synchronous Python child process for this phase |
-| Queue/progress | Redis/BullMQ and live progress remain post-feature work |
-| Dataset storage | Local filesystem behind a storage adapter for now; object storage before deployment |
-| Local uploads | Stored under `packages/backend/uploads/` and git-ignored |
-| Email delivery | Password reset/email verification deferred until a provider is chosen |
-| Engine | Add EMA, real holdout/OOS and robustness checks |
-| AI | Add schema-constrained Gemini summaries with local fallback |
-| Frontend architecture | Keep current context/fetch/useState while completing features; TanStack Query/RHF/CSS Modules migration is deferred to Phase 6 |
+| Run execution | Synchronous Python child process with in-memory process cancellation registry and client disconnect aborts for early phases (Phases 0–5); async BullMQ queue in Phase 7 |
+| Queue/progress | Redis/BullMQ and live WebSocket progress deferred to Phase 7 |
+| Dataset storage | Local filesystem behind a storage adapter for now; object storage (S3/R2) in Phase 7 |
+| Local uploads | Stored under `packages/backend/uploads/:workspaceId/` and git-ignored (tenant-isolated) |
+| Email delivery | Password reset and email verification deferred until a transactional email provider is chosen; account management is self-contained |
+| Engine | Add EMA, real holdout/OOS, edge-of-grid robustness checks, and search-grid parameter explosion limits |
+| AI | Add schema-constrained Gemini summaries with local fallback and zero hallucinated metrics |
+| Error logs | Stored in a dedicated indexed `ErrorLog` MongoDB collection (Screen 4.2) rather than unbounded arrays |
+| Frontend architecture | Keep current context/fetch/useState while completing features (Phases 0–5); full TanStack Query, React Hook Form + Zod, and CSS Modules migration in Phase 6 |
 
 ## 2. Current gaps
 
 | Area | Current state | Missing |
 |---|---|---|
-| Live mode | Frontend defaults to `mockApi` unless `VITE_USE_MOCK_API=false` | Live default, mock only in development, mock removed from production bundle |
-| Seed data | Backend reads `prototypes/02-mid-fi/mockData.json` | Backend-owned fixture |
-| Shared contracts | Shared Zod schemas exist | Response validation and backend DTO serializers |
-| Profiles (F1) | Backend CRUD exists | Profiles page, create/edit/delete/clone UI |
-| Account (F8) | Login, refresh, logout, me | Registration UI, change password, password reset/email verification |
-| Datasets (F2) | JSON `csvText` upload and local file storage | Multipart/presigned upload, progress, durable storage adapter |
-| Runs (F3) | Synchronous execution | Cancellation, filters, pagination, retry |
-| Experiment log (F4) | Run list and comparison | Filtering, pagination, richer error logs |
-| Results (F5) | Equity curve, metrics, CSV export | PDF export, error-log tab, retry |
-| Assistant (F6) | Gemini config parsing with local fallback | Gemini summary, clarification UI, response validation |
-| Robustness (F7) | Heuristic warnings and synthetic OOS value | Real holdout/OOS, edge-of-grid detection, sample-size warnings |
-| Engine | SMA only; EMA routed through SMA | EMA implementation, holdout evaluation |
-| Tests | Auth/config/domain/bridge/pytest | Dataset/profile/run integration, frontend, E2E, load |
+| Live mode | Frontend defaults to `mockApi` unless `VITE_USE_MOCK_API=false` | Live default, mock only in development, mock completely removed from production bundle |
+| Seed data | Backend reads `prototypes/02-mid-fi/mockData.json` | Backend-owned fixture at `packages/backend/fixtures/mockData.json` |
+| Shared contracts | Basic Zod schemas exist; `countCombinations` lives in `mockApi` | Decoupled combination math in `@optitrader/shared`, `WorkspaceBootstrapDTO`, response validation schemas, and backend DTO serializers |
+| Profiles (F1) | Backend CRUD exists | `ProfilesPage`, create/edit/delete/clone UI, launch-from-profile, owner-scoping validation |
+| Account (F8) | Login, refresh, logout, me | Registration UI, change password with session revocation, login audit logs |
+| Datasets (F2) | JSON `csvText` upload and unindexed local file storage | Multipart upload, storage adapter, OHLCV semantic validation, preview modal, referential integrity check on deletion |
+| Runs (F3) | Synchronous execution without process tracking | `ProcessRegistry`, cancellation endpoint (`POST /cancel`), client connection-drop aborts, status polling, retry |
+| Experiment log (F4) | Run list and comparison | Query filtering, cursor/offset pagination, dedicated `ErrorLog` collection and pagination |
+| Results (F5) | Equity curve, metrics, CSV export | PDF export, error-log console tab (Screen 4.2), retry failed run |
+| Assistant (F6) | Gemini config parsing with local fallback | Schema-constrained Gemini summary, question clarification UI, quota/rate-limit tracking |
+| Robustness (F7) | Heuristic warnings and synthetic OOS value | Real holdout/OOS metric calculation, boundary/edge-of-grid detection, sample-size warnings |
+| Engine | SMA only; EMA routed through SMA | Real EMA momentum implementation, train/holdout dataset splitting, parameter explosion guards |
+| Tests & Quality | Auth/config/domain/bridge/pytest | Automated smoke script (`npm run smoke`), multi-package test matrix, `vitest-axe` page checks, Playwright E2E suite, frontend architecture migration |
 
 ## 3. Phase 0 — Make live mode the default
 
@@ -109,7 +110,7 @@ Related documents:
     - Support cloning: allow cloning via client-side prefilled creation or `POST /api/profiles/:id/clone` with an incremented copy suffix (`Copy of ...`).
   - Update `launchRun` in `runService.ts`:
     - When `profile_id` is supplied, verify ownership and bind directly to that profile rather than auto-generating a new profile on each run.
-    - If `profile_id` is omitted, generate an ad-hoc profile with collision-safe naming.
+    - If `profile_id` is omitted, do not collide with `{ owner: 1, name: 1 }`: generate an ad-hoc profile with collision-safe naming (appending a timestamp or short hash, e.g. `${symbol} ${strategy} Sweep (${shortId})`), or bind directly to a dedicated reusable workspace default sweep profile.
   - Define profile deletion referential integrity:
     - Retain historical backtests when a profile is deleted.
     - Fallback in `decorateRun` to `run.profile_snapshot?.name` (with a marker such as `[Deleted] <name>`) rather than generic `Unknown profile`.
@@ -213,7 +214,11 @@ Related documents:
 
 - **Upload Pipeline & Progress:**
   - Replace raw `file.text()` string loading with `FormData` multipart upload.
-  - Implement real upload progress using `XMLHttpRequest` (or Axios) to drive a visible Bootstrap progress bar during upload.
+  - Extend `src/api/client.ts` with a dedicated `http.upload<T>(path, formData, schema, { onProgress, signal })` helper:
+    - Omit manual `Content-Type: application/json` so the browser dynamically computes the boundary.
+    - Preserve `credentials: 'include'` and automatic 401 cookie session refresh.
+    - Implement upload progress tracking using `XMLHttpRequest` (or Fetch `ReadableStream`) to drive a visible Bootstrap progress bar during upload.
+    - Parse responses through Zod response schemas per `AGENTS.md`.
   - Surface actionable validation errors (e.g. "Row 412: timestamp out of order" or "Missing columns: high, volume") in an accessible alert region.
   - Add a direct "Retry upload" button on failed network or validation attempts.
 - **Dataset Preview Modal / Drawer:**
@@ -255,7 +260,9 @@ Keep synchronous execution in this phase (Redis/BullMQ queue remains in Phase 7)
     - Append cancellation audit record to `ErrorLog`.
 - **Frontend Cancellation UX (`packages/frontend`):**
   - Add `AbortController` support to `launchRun` in `client.ts` and `AppContext.tsx`.
-  - In `ExperimentStudioPage` launch modal / progress state, expose a responsive "Cancel run" button that triggers `abortController.abort()` and calls `POST /api/runs/:id/cancel`.
+  - In `ExperimentStudioPage` launch modal / progress state, expose a responsive "Cancel run" button:
+    - For in-flight synchronous launches (before `run_id` is returned), cancelling triggers `abortController.abort()`, terminating the HTTP request; backend `req.on('close')` catches the disconnect and terminates the child process.
+    - For background or dashboard-listed runs, the UI calls `POST /api/runs/:id/cancel`.
   - Provide a manual status refresh action for active jobs.
 
 ### Run Querying, Filtering & Pagination
@@ -266,6 +273,7 @@ Keep synchronous execution in this phase (Redis/BullMQ queue remains in Phase 7)
   - Define generic `paginatedResponseSchema<T>`: `{ items: T[]; total: number; page: number; pageSize: number; totalPages: number }`.
 - **Backend API & Database Indexing (`packages/backend`):**
   - Update `GET /api/runs` and `GET /api/error-logs` to validate query parameters with Zod and return paginated envelopes.
+  - Maintain bootstrap efficiency: keep `GET /api/workspace` (`toWorkspaceBootstrapDTO`) returning the latest $N$ (e.g. 25) runs as an array for immediate UI loading, while `GET /api/runs` serves paginated browsing and comparisons.
   - Add compound indexes in `Run` model:
     - `{ owner: 1, created_at: -1 }`
     - `{ owner: 1, status: 1, created_at: -1 }`
@@ -340,12 +348,12 @@ Keep synchronous execution in this phase (Redis/BullMQ queue remains in Phase 7)
 - **Continuous Indicator Warm-up & Train/Holdout Slicing:**
   - Inside `backtest.py`, split chronologically based on `holdout_pct` (e.g. 0.2 -> 80% train / In-Sample, 20% test / Out-of-Sample).
   - Compute moving average indicators over the full continuous series to prevent `NaN` warm-up distortion on the holdout boundary.
-  - Parameter optimization runs strictly on In-Sample (IS) data: select the best parameter combination based on the chosen objective subject to the drawdown limit.
+  - Parameter optimization runs strictly on In-Sample (IS) data: select the best parameter combination based on the chosen objective subject to the drawdown limit. If zero combinations satisfy `max_drawdown_limit`, select the overall highest-objective parameter pair and attach the explicit robustness warning `"Best result exceeds the configured drawdown limit"`.
   - Out-of-Sample (OOS) evaluation: evaluate the winning parameter set on the unseen holdout slice to produce genuine out-of-sample metrics (`oos_sharpe`, `oos_total_return`, `oos_max_drawdown`).
 - **Real Out-of-Sample Degradation:**
   - Replace the synthetic heuristic formula in `runService.ts` with the real relative Sharpe performance drop:
     $$\text{out\_of\_sample\_drop} = \frac{\text{Sharpe}_{\text{OOS}} - \text{Sharpe}_{\text{IS}}}{\max(|\text{Sharpe}_{\text{IS}}|, 0.001)}$$
-  - Store OOS metrics in `robustnessSchema` (`packages/shared`) and expose them on `ResultsPage`.
+  - Store OOS metrics (`oos_sharpe`, `oos_total_return`, `oos_max_drawdown`) in `robustnessSchema` (`packages/shared`), update the Python `BacktestResult` bridge interface, and expose them on both `ResultsPage` and `ComparisonPage`.
 
 ### Robustness Guard & Calibrated Confidence Scoring
 
@@ -455,12 +463,23 @@ Keep synchronous execution in this phase (Redis/BullMQ queue remains in Phase 7)
     - Benchmark read endpoints (`GET /api/runs`, `GET /api/datasets`, `GET /api/profiles`) sustaining >= 50 req/sec with p95 < 200ms.
     - Test concurrent upload and run launch rate limiting under load.
 
-### Observability, OpenAPI & Sentry
+### Observability, OpenAPI, Error Boundaries & Sentry
 
 - **Structured Logging & Request Correlation:**
   - Implement request ID correlation middleware in `packages/backend` using `crypto.randomUUID()`.
   - Attach `X-Request-Id` to all HTTP responses and bind `requestId` and `userId` to `pino` child loggers.
   - Ensure zero sensitive fields (passwords, tokens, cookies, PII) are logged.
+- **Environment Validation & Config Integrity:**
+  - Keep startup Zod schema (`packages/backend/src/config.ts`) and `.env.example` strictly synchronized whenever new environment variables are introduced across phases (`UPLOAD_DIR`, `MAX_UPLOAD_MB`, `STORAGE_DRIVER`, `SENTRY_DSN`, `REDIS_URL`, etc.).
+- **Graceful Shutdown Management:**
+  - Implement unified process termination on `SIGTERM` and `SIGINT`:
+    1. Stop accepting new HTTP connections.
+    2. Gracefully close WebSocket connections (Phase 7).
+    3. Cancel/reap active Python processes in `ProcessRegistry`.
+    4. Close Mongoose MongoDB connection cleanly before process exit.
+- **Error Boundaries & Accessible Error Surfacing (`AGENTS.md` Compliance):**
+  - Integrate `react-error-boundary` across route boundaries in `packages/frontend/src/App.tsx`.
+  - Surface all API and runtime errors inside accessible `aria-live="polite"` / `"assertive"` notification regions with visible `:focus-visible` styling.
 - **OpenAPI 3.1 Documentation:**
   - Generate OpenAPI 3.1 documentation directly from `packages/shared` Zod schemas (using `@asteasolutions/zod-to-openapi` or `zod-openapi`) to prevent documentation drift.
   - Expose interactive documentation at `GET /api/docs` and raw spec at `GET /api/docs/openapi.json`.
@@ -586,33 +605,76 @@ Detailed architecture tracked in [`production-plan.md`](production-plan.md).
 
 ## 11. Recommended order
 
-1. Live mode default + shared DTOs/serializers
-2. Profiles + account
-3. Dataset upload/storage
-4. Engine EMA + holdout + robustness
-5. Gemini summary
-6. Run cancellation/progress UX
-7. Frontend/E2E tests
-8. Production deployment hardening
+The implementation strictly follows dependency prerequisites: foundational contracts and runtime boundaries must stabilize before data ingestion, and lifecycle controls must precede heavy compute and AI synthesis.
+
+| Step | Phase | Focus | Key Deliverable & Verification Gate |
+|---|---|---|---|
+| **1** | **Phase 0** | Live Mode & Contracts | Shared DTOs, serializers, `countCombinations` in shared, zero mock in prod build, passes `npm run smoke`. |
+| **2** | **Phase 1** | Identity & Profiles | User registration, password change, `ProfilesPage` CRUD/clone, owner-scoped workspace boundaries. |
+| **3** | **Phase 2** | Datasets & Storage | Multipart upload, storage adapter (local disk), CSV OHLCV validation, preview modal, referential integrity check. |
+| **4** | **Phase 3** | Run Lifecycle & UX | Child process registry, run cancellation (`POST /cancel` & client abort), run/error-log pagination, query filters, PDF export. |
+| **5** | **Phase 4** | Engine & Robustness | EMA momentum implementation, real train/holdout OOS split, edge-of-grid detection, pytest divergence suite. |
+| **6** | **Phase 5** | Gemini Assistant | Schema-constrained post-run Gemini summary, question clarification UI, structured fallback, zero metric hallucination. |
+| **7** | **Phase 6** | Quality & Modernization | 1. Backend integration tests.<br>2. Frontend architecture migration (TanStack Query, RHF + Zod, CSS Modules).<br>3. RTL + `vitest-axe` page tests & Playwright E2E suite. |
+| **8** | **Phase 7** | Deployment Hardening | Multi-runtime Docker (Node 24 + Python 3.11), Redis/BullMQ queue, WebSocket live progress, S3/R2 storage, cloud staging deploy. |
 
 ## 12. Out of scope for this plan
 
-- Redis/BullMQ queue
-- WebSocket/SSE live progress
-- Object storage in the feature phase
-- Email delivery for reset/verification
-- Full frontend architecture refactor
-- Broker integrations
-- User-uploaded strategies
+### Deferred to Later Phases (Phases 6 & 7)
+
+These capabilities are intentionally excluded from early feature development (Phases 0–5) to ensure rapid feature delivery:
+- **Asynchronous Queue & Workers:** Redis and BullMQ job queue infrastructure (deferred to Phase 7).
+- **Live WebSocket Progress:** Real-time optimization progress streaming over WebSockets (synchronous execution with process cancellation is used in Phase 3; WebSockets deferred to Phase 7).
+- **Cloud Object Storage Adapter:** AWS S3 and Cloudflare R2 persistence (local filesystem adapter is used in Phase 2; S3/R2 deferred to Phase 7).
+- **Frontend Architecture Migration:** TanStack Query, React Hook Form, and CSS Modules migrations are deferred until feature parity is reached in Phase 6.
+
+### Explicitly Excluded Product Capabilities (Not in v1)
+
+The following capabilities are outside the scope of this capstone and v1 roadmap:
+- **Live Broker Execution & Order Routing:** No live market execution, exchange connectivity (e.g., Binance, Interactive Brokers), or paper trading order books.
+- **Real-Time Market Data Feeds:** No live WebSocket quote tickers or streaming bar aggregators; backtesting runs solely on static historical OHLCV CSVs.
+- **Untrusted User Code Execution:** No arbitrary user Python script uploads or sandboxed remote code execution. Strategies are constrained to platform-defined strategies (`sma_crossover`, `ema_momentum`).
+- **Multi-Asset Portfolio Optimization:** No cross-asset portfolio allocation, multi-symbol baskets, or factor risk models.
+- **Third-Party Email / SMS Services:** No external SMTP/SendGrid/Postmark integration for password resets or email verification (account management is self-contained in v1).
+- **SaaS Billing & Team Organizations:** No Stripe integration, paid tier metering, or multi-user organization hierarchies (scoped to solo quantitative traders).
 
 ## 13. Verification
 
+Before marking any phase or feature complete, run the verification matrix across all touched packages.
+
+### 1. Static Analysis & Type Safety
 ```bash
+npm run format:check
 npm run lint
 npm run typecheck
-npm run build
-npm test
+```
+
+### 2. Multi-Runtime Test Suites
+```bash
+# Node backend integration and unit tests
+npm test -w @optitrader/backend
+
+# Frontend component & vitest-axe accessibility tests
+npm test -w @optitrader/frontend
+
+# Python vectorbt backtest engine & robustness tests
 npm run test:engine
 ```
 
-Plus a live browser smoke test with `VITE_USE_MOCK_API=false`.
+### 3. Build & Asset Isolation Verification
+```bash
+# Clean builds for all packages (shared, backend, frontend)
+npm run build
+
+# Verify zero mock data or mockApi leaks in production frontend bundle
+! grep -q "mockData" packages/frontend/dist/assets/*.js && echo "Bundle isolation verified: zero mock data in production bundle."
+```
+
+### 4. End-to-End & Automated Smoke Testing
+```bash
+# Automated live API smoke test (setup -> upload -> run -> teardown)
+npm run smoke
+
+# Playwright end-to-end browser workflows (Phase 6+)
+npm run test:e2e
+```

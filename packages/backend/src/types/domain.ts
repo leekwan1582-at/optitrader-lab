@@ -42,13 +42,17 @@ export interface AppConfig {
   accessTokenTtl: string;
   refreshTokenTtl: string;
   cookieDomain: string | null;
+  uploadDir: string;
+  maxUploadMb: number;
 }
+
 
 export interface CsvMetadata {
   rows: number;
   dateRange: string;
   firstDate: Date | null;
   lastDate: Date | null;
+  columns?: string[];
 }
 
 export interface BacktestResult {
@@ -63,9 +67,18 @@ export interface BacktestResult {
     sharpe_ratio?: number;
     total_return?: number;
     max_drawdown?: number;
+    calmar_ratio?: number;
     win_rate?: number;
     profit_factor?: number;
     total_trades?: number;
+    oos_sharpe?: number;
+    oos_total_return?: number;
+    oos_max_drawdown?: number;
+  };
+  robustness?: {
+    edge_of_grid?: boolean;
+    out_of_sample_drop?: number;
+    warnings?: string[];
   };
   equity_curve?: Array<{ date: string; value: number }>;
   error?: string;
@@ -99,6 +112,7 @@ export interface RunRecord {
   owner: string;
   profile_id: string;
   dataset_id: string;
+  retried_from?: string;
   run_hash?: string;
   config?: RunConfig;
   profile_snapshot?: ProfileSnapshot;

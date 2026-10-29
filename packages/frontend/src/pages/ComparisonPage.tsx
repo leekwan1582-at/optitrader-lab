@@ -27,11 +27,24 @@ interface MetricRowData {
 
 function metricRows(runs: Run[]): MetricRowData[] {
   return [
-    { label: 'Sharpe ratio', values: runs.map((run) => formatNumber(run.best?.sharpe)) },
-    { label: 'Total return', values: runs.map((run) => formatPercent(run.best?.total_return)) },
-    { label: 'Max drawdown', values: runs.map((run) => formatPercent(run.best?.max_drawdown)) },
-    { label: 'Profit factor', values: runs.map((run) => formatNumber(run.best?.profit_factor)) },
+    { label: 'Sharpe ratio (IS)', values: runs.map((run) => formatNumber(run.best?.sharpe)) },
+    { label: 'Total return (IS)', values: runs.map((run) => formatPercent(run.best?.total_return)) },
+    { label: 'Max drawdown (IS)', values: runs.map((run) => formatPercent(run.best?.max_drawdown)) },
+    { label: 'Calmar ratio', values: runs.map((run) => formatNumber(run.best?.calmar_ratio)) },
+    { label: 'OOS Sharpe', values: runs.map((run) => formatNumber(run.best?.oos_sharpe)) },
+    { label: 'OOS Return', values: runs.map((run) => formatPercent(run.best?.oos_total_return)) },
+    { label: 'OOS Max DD', values: runs.map((run) => formatPercent(run.best?.oos_max_drawdown)) },
     { label: 'Out-of-sample drop', values: runs.map((run) => formatPercent(run.robustness?.out_of_sample_drop)) },
+    {
+      label: 'Edge of grid',
+      values: runs.map((run) => (
+        run.robustness?.edge_of_grid
+          ? <span key={run.run_id} className="badge bg-danger">Hit boundary</span>
+          : <span key={run.run_id} className="text-muted">No</span>
+      )),
+    },
+    { label: 'Confidence score', values: runs.map((run) => `${formatNumber(run.robustness?.confidence_score, 1)} / 10`) },
+    { label: 'Profit factor', values: runs.map((run) => formatNumber(run.best?.profit_factor)) },
     { label: 'Trials', values: runs.map((run) => formatInteger(run.trials)) },
     { label: 'Status', values: runs.map((run) => <StatusBadge key={run.run_id} status={run.status} />) },
   ];

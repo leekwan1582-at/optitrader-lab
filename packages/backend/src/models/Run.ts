@@ -19,17 +19,19 @@ const runSchema = new Schema<RunData>(
   {
     _id: { type: String, required: true },        // run_id
     owner: { type: String, required: true, index: true },
-    profile_id: { type: String, required: true, ref: 'Profile' },
-    dataset_id: { type: String, required: true, ref: 'Dataset' },
+    profile_id: { type: String, required: true, ref: 'Profile', index: true },
+    dataset_id: { type: String, required: true, ref: 'Dataset', index: true },
+    retried_from: { type: String, ref: 'Run' },
     run_hash: { type: String, index: true },
     config: { type: mongoose.Schema.Types.Mixed },
     profile_snapshot: { type: mongoose.Schema.Types.Mixed },
     status: {
       type: String,
-      enum: ['completed', 'failed', 'running', 'queued'],
+      enum: ['completed', 'failed', 'running', 'queued', 'cancelled'],
       required: true,
+      index: true,
     },
-    created_at: { type: Date, required: true },
+    created_at: { type: Date, required: true, index: true },
     duration_ms: { type: Number },
     holdout_pct: { type: Number },
     trials: { type: Number },
@@ -42,5 +44,10 @@ const runSchema = new Schema<RunData>(
   },
   { timestamps: false, _id: false, toJSON: { transform: (_doc, ret) => { ret.run_id = ret._id; return ret; } } }
 );
+
+// Compound indexes for optimal queries and pagination
+runSchema.index({ owner: 1, created_at: -1 });
+runSchema.index({ owner: 1, status: 1, created_at: -1 });
+runSchema.index({ owner: 1, dataset_id: 1, created_at: -1 });
 
 export default mongoose.model<RunData>('Run', runSchema);

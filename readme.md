@@ -77,27 +77,75 @@ marcus@optitrader.dev / demo1234
 
 ## Quick start — live API
 
-Prerequisites: Node.js 24, Python 3.11, MongoDB (local or Atlas), and a Gemini API key.
+Prerequisites: Node.js 24, Python 3.11, MongoDB (local or Docker), and optionally a Gemini API key.
 
 ```bash
+# 0. Install workspace dependencies
 npm install
 
-# 1. Backend
+# 1. Start MongoDB (either local systemd service or Docker)
+# If using local systemd: sudo systemctl start mongod
+# If using Docker: docker run -d --name mongo -p 27017:27017 mongo:7
+
+# 2. Configure & Start Backend
 cd packages/backend
 cp .env.example .env
-# edit .env: MONGO_URI, GEMINI_API_KEY, CLIENT_URL, JWT secrets
+# Verify .env: MONGO_URI, GEMINI_API_KEY, CLIENT_URL, JWT secrets
 npm run config:check
-npm run seed
-npm run dev
+npm run seed             # Seeds demo account: marcus@optitrader.dev / demo1234
+npm run dev              # Starts Express on http://localhost:5000
 
-# 2. Frontend (new terminal)
+# 3. Configure & Start Frontend (in a new terminal)
 cd packages/frontend
-cp .env.example .env
-# set VITE_USE_MOCK_API=false (dev proxy already targets localhost:5000)
-npm run dev
+cp .env.example .env     # Defaults to VITE_API_URL=/api and VITE_USE_MOCK_API=false
+npm run dev              # Starts Vite on http://localhost:5173
 ```
 
-API: `http://localhost:5000` · health check: `GET /api/health`.
+API: `http://localhost:5000` · health check: `GET /api/health` · OpenAPI docs: `GET /api/docs`.
+
+### Recommended Next Steps to Run Locally
+
+1. **Verify Services Are Listening:**
+   - Backend Express server is running on `http://localhost:5000`.
+   - Frontend Vite development server is running on `http://localhost:5173`.
+   - MongoDB is accepting connections at `mongodb://localhost:27017`.
+
+2. **Authenticate in the Browser:**
+   - Open `http://localhost:5173` in your browser.
+   - If not authenticated, you will be redirected to `http://localhost:5173/login`.
+   - *Note on Initial Console Warnings:* Seeing `POST /api/auth/refresh 401 (Unauthorized)` on the very first page load is normal—the client attempts a silent session restoration before an authentication cookie exists, and gracefully redirects to `/login`.
+   - Log in using the seeded credentials (`marcus@optitrader.dev` / `demo1234`) or click **Register** to create a new workspace.
+
+3. **Verify API Communication:**
+   - Once logged in, `ot_access` and `ot_refresh` HttpOnly cookies are set.
+   - The dashboard calls `/api/workspace` and `/api/runs` via Vite proxy (`/api` -> `http://localhost:5000`), loading experiments, datasets, and profiles seamlessly.
+
+## Quick start — local production simulation
+
+To test and verify the compiled, production-ready build (`dist/`) without development reloaders:
+
+```bash
+# 0. Build all packages for production
+npm run build
+
+# 1. Backend: configure production secrets and start compiled Node server
+# In packages/backend/.env set:
+#   NODE_ENV=production
+#   CLIENT_URL=http://localhost:4173
+#   JWT_ACCESS_SECRET=<32+ bytes>
+#   JWT_REFRESH_SECRET=<32+ bytes>
+#   MONGO_URI=mongodb://localhost:27017/optitrader_lab
+npm run seed:prod -w @optitrader/backend   # Seeds using dist/seed.js
+npm start -w @optitrader/backend           # Runs node dist/server.js on :5000
+
+# 2. Frontend: serve production preview bundle (in a separate terminal)
+# In packages/frontend/.env set:
+#   VITE_API_URL=http://localhost:5000/api
+#   VITE_USE_MOCK_API=false
+npm run preview -w @optitrader/frontend -- --port 4173
+```
+
+Open `http://localhost:4173` to verify the production minified bundle with HttpOnly cookie session handling.
 
 ## Tests
 

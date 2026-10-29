@@ -27,6 +27,18 @@ VITE_USE_MOCK_API=true
 
 The Vite dev server proxies `/api` to `http://localhost:5000`, keeping cookies same-origin.
 
+### Recommended Next Steps to Run Locally
+
+1. **Start Backend & Database First:**
+   - Ensure MongoDB is listening (e.g., port 27017).
+   - In `packages/backend`: run `npm run seed` and `npm run dev` (starts on port 5000).
+2. **Start Frontend:**
+   - In `packages/frontend`: run `npm run dev` (starts on port 5173).
+3. **Log in / Register:**
+   - Navigate to `http://localhost:5173/login`.
+   - *Note on startup 401s:* A `POST /api/auth/refresh 401` in the browser console on cold start is expected; the app attempts a silent session recovery before cookies are issued.
+   - Use seeded user `marcus@optitrader.dev` / `demo1234` or register a new user. Protected routes like `/api/runs` and `/api/workspace` will then load cleanly.
+
 ## Authentication
 
 - Login calls `POST /api/auth/login` with `credentials: 'include'`.

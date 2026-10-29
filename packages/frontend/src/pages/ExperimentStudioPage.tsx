@@ -28,7 +28,9 @@ interface StudioForm extends RunConfig {
 interface StudioNavState {
   prompt?: string;
   config?: RunConfig;
+  profileId?: string;
 }
+
 
 const defaultForm: StudioForm = {
   prompt: suggestionPrompts[0] ?? '',
@@ -51,11 +53,12 @@ function rangeToForm(range: Partial<ParameterRange> | undefined, fallback: Param
 }
 
 export default function ExperimentStudioPage() {
-  const { datasets, profiles, settings, parsePrompt, launchRun } = useApp();
+  const { datasets, profiles, settings, parsePrompt, launchRun, createProfile } = useApp();
   const location = useLocation();
   const navState = location.state as StudioNavState | null;
   const navigate = useNavigate();
   const initialized = useRef(false);
+  const [selectedProfileId, setSelectedProfileId] = useState<string>('');
   const [form, setForm] = useState<StudioForm>(() => ({
     ...defaultForm,
     prompt: navState?.prompt || defaultForm.prompt,
@@ -63,6 +66,8 @@ export default function ExperimentStudioPage() {
   const [parsing, setParsing] = useState(false);
   const [launching, setLaunching] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [clarification, setClarification] = useState<string | null>(null);
+  const [clarificationReply, setClarificationReply] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -81,17 +86,87 @@ export default function ExperimentStudioPage() {
       return;
     }
 
-    const profile = profiles[0];
-    setForm((current) => ({
-      ...current,
-      dataset_id: datasets[0]?.dataset_id || '',
-      strategy_type: profile?.strategy_type || current.strategy_type,
-      objective: profile?.objective || current.objective,
-      max_drawdown_limit: profile?.max_drawdown_limit ?? current.max_drawdown_limit,
-      fast_ma: rangeToForm(profile?.params?.fast_ma, defaultForm.fast_ma),
-      slow_ma: rangeToForm(profile?.params?.slow_ma, defaultForm.slow_ma),
-    }));
+    const matchedProfile = navState?.profileId
+      ? profiles.find((p) => p.profile_id === navState.profileId)
+      : profiles[0];
+
+    if (matchedProfile) {
+      setSelectedProfileId(matchedProfile.profile_id);
+      setForm((current) => ({
+        ...current,
+        dataset_id: datasets[0]?.dataset_id || '',
+        profile_id: matchedProfile.profile_id,
+        strategy_type: matchedProfile.strategy_type,
+        objective: matchedProfile.objective,
+        max_drawdown_limit: matchedProfile.max_drawdown_limit,
+        fast_ma: rangeToForm(matchedProfile.params?.fast_ma, defaultForm.fast_ma),
+        slow_ma: rangeToForm(matchedProfile.params?.slow_ma, defaultForm.slow_ma),
+      }));
+    } else {
+      setForm((current) => ({
+        ...current,
+        dataset_id: datasets[0]?.dataset_id || '',
+      }));
+    }
   }, [datasets, navState, profiles]);
+
+  function handleProfileSelect(profileId: string) {
+    setSelectedProfileId(profileId);
+    if (!profileId) {
+      setForm((current) => ({ ...current, profile_id: undefined }));
+      return;
+    }
+    const profile = profiles.find((p) => p.profile_id === profileId);
+    if (profile) {
+      setForm((current) => ({
+        ...current,
+        profile_id: profile.profile_id,
+        strategy_type: profile.strategy_type,
+        objective: profile.objective,
+        max_drawdown_limit: profile.max_drawdown_limit,
+        fast_ma: rangeToForm(profile.params?.fast_ma, current.fast_ma),
+        slow_ma: rangeToForm(profile.params?.slow_ma, current.slow_ma),
+      }));
+    }
+  }
+
+  async function handleSaveAsProfile() {
+    const result = await Swal.fire({
+      title: 'Save as Strategy Profile',
+      input: 'text',
+      inputLabel: 'Profile Name',
+      inputValue: `${activeDataset?.symbol || 'Strategy'} ${strategyLabel(form.strategy_type)} Custom`,
+      showCancelButton: true,
+      inputValidator: (val) => (!val ? 'Profile name is required' : null),
+    });
+
+    if (typeof result.value === 'string' && result.value.trim().length > 0) {
+      const profileName = result.value.trim();
+      try {
+        const created = await createProfile({
+          name: profileName,
+          strategy_type: form.strategy_type,
+          objective: form.objective,
+          max_drawdown_limit: form.max_drawdown_limit,
+          params: {
+            fast_ma: form.fast_ma,
+            slow_ma: form.slow_ma,
+          },
+        });
+        setSelectedProfileId(created.profile_id);
+        setForm((current) => ({ ...current, profile_id: created.profile_id }));
+        void Swal.fire({ icon: 'success', title: 'Profile saved', timer: 1200, showConfirmButton: false });
+      } catch (err) {
+        void Swal.fire({
+          icon: 'error',
+          title: 'Could not save profile',
+          text: err instanceof Error ? err.message : 'Please check your inputs.',
+        });
+      }
+    }
+  }
+
+
 
   const combinations = useMemo(() => countCombinations(form), [form]);
   const overCap = combinations > (settings.max_trials || 500);
@@ -113,8 +188,9 @@ export default function ExperimentStudioPage() {
     setError(null);
   }
 
-  async function handleParse() {
-    if (!form.prompt.trim()) {
+  async function handleParse(promptOverride?: string) {
+    const textToParse = promptOverride ?? form.prompt;
+    if (!textToParse.trim()) {
       setError('Describe the optimization you want before parsing.');
       return;
     }
@@ -123,19 +199,35 @@ export default function ExperimentStudioPage() {
     setError(null);
     setMessage(null);
     try {
-      const parsed = await parsePrompt(form.prompt);
+      const parsed = await parsePrompt(textToParse);
       setForm((current) => ({
         ...current,
+        prompt: textToParse,
         ...parsed,
         fast_ma: rangeToForm(parsed.fast_ma, current.fast_ma),
         slow_ma: rangeToForm(parsed.slow_ma, current.slow_ma),
       }));
-      setMessage(parsed.clarification || `Parsed ${parsed.estimated_combinations} combinations from your prompt.`);
+      if (parsed.clarification) {
+        setClarification(parsed.clarification);
+        setMessage(null);
+      } else {
+        setClarification(null);
+        setMessage(`Parsed ${parsed.estimated_combinations} combinations from your prompt.`);
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to parse the prompt.');
     } finally {
       setParsing(false);
     }
+  }
+
+  function handleClarificationSubmit(replyText?: string) {
+    const reply = (replyText ?? clarificationReply).trim();
+    if (!reply) return;
+    const combinedPrompt = `${form.prompt.trim()}. Clarification: ${reply}`;
+    setForm((current) => ({ ...current, prompt: combinedPrompt }));
+    setClarificationReply('');
+    void handleParse(combinedPrompt);
   }
 
   async function handleLaunch() {
@@ -186,6 +278,58 @@ export default function ExperimentStudioPage() {
 
       {error && <Alert variant="danger" className="soft-alert">{error}</Alert>}
       {message && <Alert variant="info" className="soft-alert">{message}</Alert>}
+      {clarification && (
+        <Alert variant="warning" className="soft-alert border-warning">
+          <div className="fw-semibold mb-1">Clarification Needed:</div>
+          <p className="mb-2">{clarification}</p>
+          <div className="d-flex flex-wrap gap-2 mb-2">
+            <button
+              type="button"
+              className="suggestion-pill"
+              onClick={() => handleClarificationSubmit('Use max drawdown limit 15%')}
+            >
+              15% Max DD
+            </button>
+            <button
+              type="button"
+              className="suggestion-pill"
+              onClick={() => handleClarificationSubmit('Optimize Sharpe ratio')}
+            >
+              Sharpe Ratio
+            </button>
+            <button
+              type="button"
+              className="suggestion-pill"
+              onClick={() => handleClarificationSubmit('Use EMA momentum strategy')}
+            >
+              EMA Momentum
+            </button>
+          </div>
+          <div className="d-flex gap-2">
+            <Form.Control
+              size="sm"
+              className="dark-input"
+              placeholder="Type your response to clarify..."
+              value={clarificationReply}
+              onChange={(e) => setClarificationReply(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleClarificationSubmit();
+                }
+              }}
+            />
+            <Button
+              size="sm"
+              variant="warning"
+              onClick={() => handleClarificationSubmit()}
+              disabled={parsing || !clarificationReply.trim()}
+            >
+              Reply
+            </Button>
+          </div>
+        </Alert>
+      )}
 
       <Row className="g-3">
         <Col xs={12} xl={7}>
@@ -214,7 +358,7 @@ export default function ExperimentStudioPage() {
             </div>
 
             <div className="d-flex align-items-center gap-3 mt-4">
-              <Button className="btn-cyan" onClick={handleParse} disabled={parsing}>
+              <Button className="btn-cyan" onClick={() => void handleParse()} disabled={parsing}>
                 {parsing ? <><Spinner size="sm" className="me-2" />Parsing…</> : 'Parse parameters'}
               </Button>
               <span className="text-muted small">
@@ -226,13 +370,39 @@ export default function ExperimentStudioPage() {
           <div className="panel p-4">
             <div className="d-flex justify-content-between align-items-center mb-3">
               <div className="panel-eyebrow">Parameter grid</div>
-              <span className={`badge-soft ${overCap ? 'badge-danger' : 'badge-success'}`}>
-                {combinations} / {settings.max_trials || 500} combinations
-              </span>
+              <div className="d-flex align-items-center gap-2">
+                <Button variant="outline-secondary" size="sm" onClick={() => void handleSaveAsProfile()}>
+                  Save as Profile
+                </Button>
+                <span className={`badge-soft ${overCap ? 'badge-danger' : 'badge-success'}`}>
+                  {combinations} / {settings.max_trials || 500} combinations
+                </span>
+              </div>
             </div>
+
+            <Row className="g-3 mb-3">
+              <Col md={12}>
+                <Form.Group controlId="profileSelect">
+                  <Form.Label>Preset Profile</Form.Label>
+                  <Form.Select
+                    className="dark-input"
+                    value={selectedProfileId}
+                    onChange={(e) => handleProfileSelect(e.target.value)}
+                  >
+                    <option value="">Custom parameters (no profile)</option>
+                    {profiles.map((p) => (
+                      <option key={p.profile_id} value={p.profile_id}>
+                        {p.name} ({p.strategy_type === 'ema_momentum' ? 'EMA' : 'SMA'} · {(p.max_drawdown_limit * 100).toFixed(0)}% DD)
+                      </option>
+                    ))}
+                  </Form.Select>
+                </Form.Group>
+              </Col>
+            </Row>
 
             <Row className="g-3">
               <Col md={6}>
+
                 <Form.Group controlId="strategyType">
                   <Form.Label>Strategy</Form.Label>
                   <Form.Select
