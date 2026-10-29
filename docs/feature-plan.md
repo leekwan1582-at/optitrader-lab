@@ -51,36 +51,44 @@ Related documents:
 - Enable mock only with both:
   - `import.meta.env.DEV`
   - `VITE_USE_MOCK_API=true`
-- Remove mock data and mock API from production bundles.
-- Update `.env.example`, login copy and “Reset demo” visibility.
+- Decouple parameter calculation: move `countCombinations` out of `mockApi` and into `packages/shared` so pages (e.g. `ExperimentStudioPage`) do not depend on mock modules.
+- Ensure zero mock code in production: configure dynamic import or conditional Vite bundling so that `mockApi` and `mockData.json` are excluded from production bundles.
+- Standardize dev API routing: default `API_URL` to relative `/api` in development to ensure requests pass through the Vite proxy and cookies (`HttpOnly`, `SameSite=Strict`) work seamlessly without CORS or domain configuration errors.
+- Update UI elements: hide or disable "Reset demo" in live mode, update `.env.example`, and adjust login copy.
 
 ### Backend
 
 - Move the seed fixture to `packages/backend/fixtures/mockData.json`.
 - Keep `npm run seed` as optional demo data.
-- Add a live smoke script:
-  login → workspace → dataset upload → profile → run → results → comparison.
+- Add an automated live smoke test script (`packages/backend/src/scripts/smoke.ts`, runnable via `npm run smoke`):
+  setup test user → login → workspace bootstrap → dataset upload → profile creation → run execution → results retrieval → comparison → teardown.
 
 ### Shared contracts
 
-- Add response schemas for workspace, dataset, profile, run, error log and comparison.
+- Move `countCombinations` pure utility to `packages/shared`.
+- Add response schemas for workspace, workspace bootstrap (`WorkspaceBootstrapDTO`), dataset, profile, run, error log, and comparison.
 - Normalize API dates to ISO strings in DTOs.
 - Add `packages/backend/src/serializers/`:
   - `toUserDTO`
   - `toWorkspaceDTO`
+  - `toWorkspaceBootstrapDTO` (including populated `profile_name`, `dataset_name`, and `symbol` on runs)
   - `toDatasetDTO`
   - `toProfileDTO`
   - `toRunDTO`
   - `toErrorLogDTO`
-- Validate serialized responses against shared schemas.
-- Add response validation to the frontend API wrapper.
+- Validate serialized responses against shared schemas before returning them to clients.
+- Add typed runtime validation to `packages/frontend/src/api/client.ts` (`request<T>(path, schema, options)`), parsing all live responses against shared Zod schemas and handling API error payloads via `ApiErrorPayload`.
 
 ### Acceptance
 
-- Live mode passes the browser smoke path.
-- Production build contains no mock data path.
-- Backend never returns raw Mongoose documents.
-- Lint, typecheck, builds, Node tests and pytest pass.
+- **Live Default:** Frontend connects to the live backend by default; mock mode is strictly opt-in (`VITE_USE_MOCK_API=true` and `DEV` only).
+- **Bundle Isolation:** Production client build (`npm run build -w @optitrader/frontend`) contains zero references to `mockApi` or bundled mock datasets.
+- **DTO Serialization & Zod Validation:**
+  - Backend controllers pass all outputs through DTO serializers; no raw Mongoose documents, internal fields (`__v`), or un-serialized ObjectIds are returned.
+  - Frontend `client.ts` validates all API responses against shared Zod schemas; malformed payloads raise structured errors.
+- **Automated Smoke Test:** An end-to-end live smoke script (`npm run smoke`) completes the full flow (login → workspace bootstrap → upload → profile launch → results → comparison) against the live API.
+- **UI State Consistency:** "Reset demo" action and demo notices are hidden or disabled when running in live mode.
+- **Quality Gates:** `npm run lint`, `npm run typecheck`, `npm test`, and `npm run test:engine` all pass with zero errors.
 
 ## 4. Phase 1 — Profiles and account management
 
